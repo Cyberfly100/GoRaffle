@@ -271,6 +271,217 @@ volumes:
 
 ---
 
+## Tags Feature (Addendum)
+
+### Schema
+
+```sql
+-- migrations/004_create_tags.sql
+CREATE TABLE tags (
+    id   SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE
+);
+
+CREATE TABLE contestant_tags (
+    contestant_id INTEGER NOT NULL REFERENCES contestants(id) ON DELETE CASCADE,
+    tag_id        INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (contestant_id, tag_id)
+);
+```
+
+### API Routes
+
+| Method | Path | Description |
+|---|---|---|
+| `GET /api/contestants/:id/tags` | Tags for one contestant (JSON) |
+| `POST /api/contestants/:id/tags` | Add tag `{"name": "..."}` (creates tag if new) |
+| `DELETE /api/contestants/:id/tags/:tag_id` | Remove tag from contestant (tag stays in DB) |
+| `GET /api/tags` | All tags ever used (for picker dropdown) |
+| `POST /api/draw` | Modified: accepts `{"must_have": [...], "any_of": [...]}` optional fields |
+
+### Tag UI
+
+- Colored bubbles per tag, color from `hash(tag_name) % palette`
+- `×` on bubble: HTMX `DELETE` → swap tag area
+- `+` bubble: opens popover with text input + dropdown of all unused-for-this-contestant tags
+- Tag picker shows **all tags ever used**
+
+### Tag Filter UI
+
+Two-zone filter bar above contestant table:
+
+```
+┌─────────────────────────────────────────────────┐
+│ Filter:                                         │
+│ Must have: [VIP] [×] [TeamA] [×]  [+]          │
+│ Any of:    [New] [×] [Active] [×] [+]          │
+│                                    [Clear all]  │
+└─────────────────────────────────────────────────┘
+```
+
+| Zone | Logic |
+|---|---|
+| **Must have** | Contestant must have ALL of these tags |
+| **Any of** | Contestant must have at least ONE of these tags |
+| **Combined** | Must have ALL "must have" AND at least ONE "any of" |
+| **Both empty** | No filter — draw from everyone |
+
+### Eligibility Logic
+
+| `excluded` | Tag filter match | Eligible? |
+|---|---|---|
+| `false` | Yes | Drawn |
+| `false` | No | Not drawn |
+| `true` | Yes | Not drawn |
+| `true` | No | Not drawn |
+
+### Filter SQL Query
+
+```sql
+SELECT c.id, c.name, c.pick_count
+FROM contestants c
+WHERE c.excluded = FALSE
+  AND NOT EXISTS (
+    SELECT 1 FROM unnest($1::text[]) AS req
+    WHERE NOT EXISTS (
+      SELECT 1 FROM contestant_tags ct
+      JOIN tags t ON ct.tag_id = t.id
+      WHERE ct.contestant_id = c.id AND t.name = req
+    )
+  )
+  AND (
+    array_length($2, 1) IS NULL
+    OR EXISTS (
+      SELECT 1 FROM contestant_tags ct
+      JOIN tags t ON ct.tag_id = t.id
+      WHERE ct.contestant_id = c.id AND t.name = ANY($2::text[])
+    )
+  )
+ORDER BY c.pick_count ASC
+```
+
+### Go Files
+
+| File | Change |
+|---|---|
+| `internal/model/model.go` | `Tag` struct, `ContestantTag` join struct |
+| `internal/db/queries.go` | Tag CRUD + `GetEligibleContestants(mustHave, anyOf []string)` |
+| `internal/raffle/engine.go` | `PickWinner` accepts optional filter params |
+| `internal/handler/api.go` | Wire 4 tag routes + modify `/api/draw` |
+
+### Template Files
+
+| File | Change |
+|---|---|
+| `templates/components/contestant_table.html` | Render tag bubbles, grey out non-matching when filter active |
+| `templates/components/filter_bar.html` | **New** — two-zone tag picker with AND/OR logic |
+| `templates/components/tag_popover.html` | **New** — add tag dialog (text input + dropdown) |
+| `templates/index.html` | Include filter bar above contestant table |
+
+### Updated Project Structure
+
+```
+migrations/
+  ├── 001_create_contestants.sql
+  ├── 002_create_picks.sql
+  ├── 003_seed_defaults.sql
+  └── 004_create_tags.sql        ← NEW
+```
+
+---
+
+## Design Guidelines (Addendum)
+
+**Do NOT reference the tkinter GUI for styling.** The original was never visually optimized.
+
+### Dark/Light Mode
+
+- Automatic detection via `prefers-color-scheme` media query
+- Manual toggle button in header that overrides preference
+- Toggle state persisted in `localStorage`
+- Smooth 200ms transition between modes
+
+### CSS Architecture
+
+```css
+/* tokens.css */
+:root {
+  /* Muted palette — light mode */
+  --bg-primary: #fafaf9;
+  --bg-secondary: #f5f5f4;
+  --bg-surface: #ffffff;
+  --text-primary: #1c1917;
+  --text-secondary: #57534e;
+  --border: #e7e5e4;
+  --accent: #78716c;
+  --accent-hover: #57534e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #1c1917;
+    --bg-secondary: #292524;
+    --bg-surface: #292524;
+    --text-primary: #fafaf9;
+    --text-secondary: #a8a29e;
+    --border: #44403c;
+    --accent: #a8a29e;
+    --accent-hover: #d6d3d1;
+  }
+}
+
+[data-theme="dark"] {
+  --bg-primary: #1c1917;
+  --bg-secondary: #292524;
+  --bg-surface: #292524;
+  --text-primary: #fafaf9;
+  --text-secondary: #a8a29e;
+  --border: #44403c;
+  --accent: #a8a29e;
+  --accent-hover: #d6d3d1;
+}
+
+[data-theme="light"] {
+  --bg-primary: #fafaf9;
+  --bg-secondary: #f5f5f4;
+  --bg-surface: #ffffff;
+  --text-primary: #1c1917;
+  --text-secondary: #57534e;
+  --border: #e7e5e4;
+  --accent: #78716c;
+  --accent-hover: #57534e;
+}
+```
+
+### Typography
+
+- System font stack: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`
+- Monospace: `"JetBrains Mono", "Fira Code", monospace`
+
+### Visual Style
+
+| Element | Style |
+|---|---|
+| Buttons | Flat with subtle shadow, rounded-lg, hover lift |
+| Cards/surfaces | `bg-surface`, rounded-xl, `shadow-sm` |
+| Inputs | `bg-secondary`, border on focus, rounded-md |
+| Tags/bubbles | `bg-accent` with low opacity, rounded-full |
+| Transitions | 200ms ease for all interactive elements |
+
+### Color Palette (Stone — muted warm grays)
+
+| Token | Light | Dark |
+|---|---|---|
+| `--bg-primary` | `#fafaf9` | `#1c1917` |
+| `--bg-secondary` | `#f5f5f4` | `#292524` |
+| `--bg-surface` | `#ffffff` | `#292524` |
+| `--text-primary` | `#1c1917` | `#fafaf9` |
+| `--text-secondary` | `#57534e` | `#a8a29e` |
+| `--border` | `#e7e5e4` | `#44403c` |
+| `--accent` | `#78716c` | `#a8a29e` |
+
+---
+
 ## Builder Agent Brief
 
 Create a new Go project implementing a raffle/pick-from-a-hat web application. Follow the structure, schema, routes, and implementation order defined above. Use Go 1.22+, `html/template` + HTMX for the frontend, PostgreSQL for persistence, goose for migrations, WebSocket for live updates, and Docker for deployment. The server listens on port 8543. All DB operations must be transactional. The core algorithm picks from the pool of non-excluded contestants with the minimum `pick_count`, selected randomly among ties. Include export/import (JSON + CSV), full pick history, and the 12-placeholder default contestants seeded on first run.
