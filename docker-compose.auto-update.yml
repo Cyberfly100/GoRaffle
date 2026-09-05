@@ -1,0 +1,18 @@
+# Opt-in automatic updates (e.g. on a NAS). Watchtower polls the registry and
+# restarts the app when CI pushes a new image. Postgres is deliberately NOT
+# labelled, so it never gets surprise-upgraded.
+#
+# Usage (after .env is set up):
+#   docker compose -f docker-compose.yml -f docker-compose.auto-update.yml pull raffle
+#   docker compose -f docker-compose.yml -f docker-compose.auto-update.yml up -d
+services:
+  raffle:
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    command: --interval 3600 --cleanup --label-enable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
