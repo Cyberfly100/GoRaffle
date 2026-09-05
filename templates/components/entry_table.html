@@ -1,0 +1,43 @@
+{{define "partial:entry_table"}}
+<section id="entry-table">
+  <div class="table">
+    <div class="row table-head">
+      <span class="cell name">Name</span>
+      <span class="cell count">Picks</span>
+      <span class="cell excl">Exclude</span>
+      <span class="cell tags">Tags</span>
+      <span class="cell del"></span>
+    </div>
+    <div id="entry-table-body" class="rows-scroll">
+      {{range $c := .Entries}}
+      <div class="row" data-id="{{$c.ID}}">
+        <input class="cell name" name="name" value="{{$c.Name}}" data-field="name" title="Click to rename">
+        <input class="cell count" name="pick_count" type="number" min="0" value="{{$c.PickCount}}" data-field="pick_count" title="Click to edit">
+        <label class="cell excl">
+          <input type="checkbox" name="excluded" value="true" data-field="excluded" {{if $c.Excluded}}checked{{end}}>
+        </label>
+        <div class="cell tags">
+          {{range $i, $t := $c.Tags}}
+          <span class="tag-bubble {{tagClass $t}}" data-tag="{{$t}}" data-tag-id="{{index $c.TagIDs $i}}">
+            {{$t}}<button class="tag-x" data-action="remove-tag" title="Remove tag">×</button>
+          </span>
+          {{end}}
+          <button class="tag-add" data-action="open-tags" title="Add tag" aria-label="Add tag"></button>
+        </div>
+        <div class="cell del">
+          <button class="btn-icon" data-action="delete" title="Delete entry">✕</button>
+        </div>
+      </div>
+      {{else}}
+      <div class="row empty">No entries yet.</div>
+      {{end}}
+    </div>
+  </div>
+  <div class="add-row">
+    <input id="new-name" placeholder="New entry name…" autocomplete="off">
+    <button id="add-entry-btn" class="btn" title="Add entry" aria-label="Add entry">
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+</section>
+{{end}}

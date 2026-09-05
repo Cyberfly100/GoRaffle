@@ -1,0 +1,25 @@
+{{define "partial:import_export"}}
+<section id="import-export">
+  <h2>Entries Import / Export</h2>
+
+  <div class="ie-group">
+    <div class="ie-label">Import entries</div>
+    <div class="import-row">
+      <label class="btn btn-file" for="import-file">
+        Choose file
+        <input type="file" id="import-file" accept=".json,.csv" hidden>
+      </label>
+      <span id="file-chosen" class="ie-filename">No file chosen</span>
+      <button id="import-btn" class="btn" disabled>Import</button>
+    </div>
+  </div>
+
+  <div class="ie-group">
+    <div class="ie-label">Export entries</div>
+    <div class="export-row">
+      <a class="btn" href="/api/export?format=json">JSON</a>
+      <a class="btn" href="/api/export?format=csv">CSV</a>
+    </div>
+  </div>
+</section>
+{{end}}

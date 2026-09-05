@@ -1,0 +1,31 @@
+services:
+  raffle:
+    build: .
+    ports:
+      - "8543:8543"
+    environment:
+      - DATABASE_URL=postgresql://user:pass@postgres:5432/raffle?sslmode=disable
+      - LISTEN_ADDR=:8543
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: raffle
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d raffle"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

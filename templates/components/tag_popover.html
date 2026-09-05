@@ -1,0 +1,21 @@
+{{define "partial:tag_popover"}}
+<div class="tag-popover">
+  <p class="tag-popover-title">Add a tag</p>
+  <form id="tag-new-form" class="tag-new-form">
+    <input name="name" placeholder="New tag name…" autocomplete="off">
+    <button class="btn btn-small">Add</button>
+  </form>
+  <div class="tag-available">
+    <span class="muted">Existing tags:</span>
+    {{if .Tags}}
+    <div class="available-chips">
+      {{range .Tags}}
+      <button class="chip {{tagClass .Name}}" data-action="add-existing-tag" data-tag="{{.Name}}">{{.Name}}</button>
+      {{end}}
+    </div>
+    {{else}}
+    <span class="muted">No existing tags yet.</span>
+    {{end}}
+  </div>
+</div>
+{{end}}

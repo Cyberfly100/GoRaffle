@@ -1,0 +1,19 @@
+{{define "partial:result"}}
+<section id="result" class="card result" role="status">
+  <div class="result-main">
+    {{if .LastPick}}
+    <div class="result-winner">
+      <span class="result-label">The winner is</span>
+      <span class="result-name">{{.LastPick.EntryName}}</span>
+      <span class="result-sub">pick #{{.LastPick.PickNumber}}</span>
+    </div>
+    {{else}}
+    <div class="result-idle">Welcome to the draw!</div>
+    {{end}}
+  </div>
+  <div class="result-actions">
+    <button id="draw-btn" class="btn btn-primary btn-lg">Draw</button>
+    <button id="history-toggle-btn" class="btn btn-small">Show history</button>
+  </div>
+</section>
+{{end}}

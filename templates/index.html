@@ -1,0 +1,47 @@
+{{define "content"}}
+<div class="grid no-history">
+  <div class="col-main">
+    {{template "partial:result" .}}
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Entries</h2>
+        <div class="header-actions">
+          <button id="reset-btn" class="btn btn-small" title="Reset all scores and clear history">Reset scores</button>
+          <button id="ie-open-btn" class="btn btn-small">Import / Export</button>
+          <button id="clear-entries-btn" class="btn btn-danger btn-small">Clear all entries</button>
+        </div>
+      </div>
+
+      <details id="filter-accordion" class="filter-accordion">
+        <summary title="Filter entries by tag">
+          <svg class="filter-summary-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Filter entries by tag"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <span id="filter-count" class="filter-count"></span>
+          <svg class="filter-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </summary>
+        {{template "partial:filter_bar" .}}
+      </details>
+
+      {{template "partial:entry_table" .}}
+    </section>
+  </div>
+
+  <aside class="col-side">
+    {{template "partial:history" .}}
+  </aside>
+</div>
+
+<dialog id="tag-dialog">
+  <div id="tag-dialog-content"></div>
+  <div class="dialog-actions">
+    <button id="tag-dialog-close" class="btn btn-small">Close</button>
+  </div>
+</dialog>
+
+<dialog id="ie-dialog" class="ie-dialog">
+  <button id="ie-close-btn" class="ie-close" title="Close" aria-label="Close">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+  </button>
+  {{template "partial:import_export" .}}
+</dialog>
+{{end}}

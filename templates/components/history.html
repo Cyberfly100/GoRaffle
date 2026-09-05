@@ -1,0 +1,24 @@
+{{define "partial:history"}}
+<section id="history" class="card history">
+  <div class="card-header">
+    <h2>History</h2>
+    <div class="header-actions">
+      <button id="undo-btn" class="btn btn-small" title="Undo the last pick" aria-label="Undo the last pick">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+      </button>
+      <a class="btn btn-small" href="/api/export/history?format=csv">Export CSV</a>
+    </div>
+  </div>
+  <ol class="history-list">
+    {{range .History}}
+    <li>
+      <span class="pick-num">#{{.PickNumber}}</span>
+      <span class="history-name">{{.EntryName}}</span>
+      <span class="pick-time">{{formatTime .PickedAt}}</span>
+    </li>
+    {{else}}
+    <li class="muted">No picks yet.</li>
+    {{end}}
+  </ol>
+</section>
+{{end}}

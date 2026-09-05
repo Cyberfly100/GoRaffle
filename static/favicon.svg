@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .ticket { stroke: #1c1917; }
+    @media (prefers-color-scheme: dark) {
+      .ticket { stroke: #fafaf9; }
+    }
+  </style>
+  <path class="ticket" d="M10 15 H50 V26 A6 6 0 0 0 50 38 V49 H10 Z" fill="none" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path class="ticket" d="M20 21 V43" fill="none" stroke-width="5" stroke-linecap="round" stroke-dasharray="6 6"/>
+</svg>

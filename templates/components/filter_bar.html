@@ -1,0 +1,36 @@
+{{define "partial:filter_bar"}}
+<div id="filter-bar" class="filter-bar">
+  <div class="filter-zones">
+    <div class="filter-zone">
+      <span class="zone-label">Must have <span class="zone-op">[AND]</span></span>
+      <div class="zone-body">
+        <div class="zone-chips" data-zone="must_have"></div>
+        <button class="tag-add" data-action="open-filter-picker" data-zone="must_have" title="Add tag" aria-label="Add tag filter"></button>
+      </div>
+    </div>
+    <div class="filter-zone">
+      <span class="zone-label">Any of <span class="zone-op">[OR]</span></span>
+      <div class="zone-body">
+        <div class="zone-chips" data-zone="any_of"></div>
+        <button class="tag-add" data-action="open-filter-picker" data-zone="any_of" title="Add tag" aria-label="Add tag filter"></button>
+      </div>
+    </div>
+  </div>
+  <div class="filter-actions">
+    <button id="clear-filter" class="btn btn-small">Clear all filters</button>
+  </div>
+  <dialog id="filter-picker">
+    <p class="tag-popover-title">Pick tags for <b id="filter-picker-zone">Must have</b></p>
+    <div class="filter-picker-chips">
+      {{range .Tags}}
+      <button class="chip {{tagClass .Name}}" data-action="pick-filter-tag" data-tag="{{.Name}}">{{.Name}}</button>
+      {{else}}
+      <span class="muted">No tags yet — add one on an entry row.</span>
+      {{end}}
+    </div>
+    <div class="dialog-actions">
+      <button id="filter-picker-close" class="btn btn-small">Close</button>
+    </div>
+  </dialog>
+</div>
+{{end}}
