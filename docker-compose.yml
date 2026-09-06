@@ -1,13 +1,10 @@
 services:
   raffle:
-    build: .
-    # Prebuilt image (pushed by CI). Local dev builds from source with
-    # --build; NAS/auto-update setups run `compose pull` instead.
     image: ghcr.io/cyberfly100/goraffle:latest
     ports:
       - "${RAFFLE_PORT:-8543}:8543"
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-raffle}?sslmode=disable
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-pass}@postgres:5432/${POSTGRES_DB:-raffle}?sslmode=disable
       - LISTEN_ADDR=:8543
     depends_on:
       postgres:
@@ -19,7 +16,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-raffle}
       POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
     volumes:
       # Point PGDATA_DIR at a NAS dataset (e.g. /mnt/tank/apps/goraffle/pgdata)
       # so DB files live where your NAS snapshots/backups cover them.

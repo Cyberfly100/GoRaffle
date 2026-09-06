@@ -57,6 +57,15 @@
   /* ---------- Partial refresh ---------- */
   // Fetch-based refresh: independent of any CDN so partials always re-render.
   async function swapPartial(url, selector) {
+    // Never tear down the reel mid-spin; the winner reveal re-renders it.
+    if (
+      selector === "#result" &&
+      (reelState.phase === "spinup" ||
+        reelState.phase === "cruising" ||
+        reelState.phase === "landing" ||
+        reelState.phase === "reduced")
+    )
+      return;
     const target = document.querySelector(selector);
     if (!target) return;
     let resp;
@@ -94,6 +103,8 @@
   }
 
   async function doDraw() {
+    // Clicking Draw is the user gesture that lets audio play.
+    if (soundOn()) audioCtx();
     const must_have = selectedTags("must_have");
     const any_of = selectedTags("any_of");
     let resp;
@@ -120,38 +131,497 @@
 
   function fallbackRenderWinner(data) {
     refreshPartials();
-    if (data?.winner?.name) toast(`The winner is ${data.winner.name}`);
+    if (data?.winner?.name) {
+      toast(`The winner is ${data.winner.name}`);
+      // No socket means no reel, but this is still the moment of reveal.
+      confettiBurst($("#result .reel") || $("#result"));
+    }
   }
 
-  /* ---------- Suspense animation ---------- */
-  let suspenseTimer = null;
+  /* ---------- Suspense reel ---------- */
+  // Horizontal slot-machine reel. The server sends name frames over WS;
+  // the client spins them, then lands on the winner when its event arrives.
+  const reelState = { phase: "idle", timers: [], seq: [], cellW: 0, tickRAF: null };
+  // Belt speed is a constant px/ms so the reel reads the same regardless of
+  // how wide the names make the cells, and so the landing can hand over
+  // without a jump in velocity. Phase lengths are tuned against the server's
+  // suspenseTotal (draw.go): wind-up + cruise fill it, then the landing runs.
+  const REEL_CRUISE_V = 1.45;
+  const REEL_LAND_MS = 1800;
+  const REEL_SPINUP_MS = 900;
+
+  function reelLater(fn, ms) {
+    reelState.timers.push(setTimeout(fn, ms));
+  }
+
+  function clearReelTimers() {
+    for (const t of reelState.timers) clearTimeout(t);
+    reelState.timers = [];
+  }
+
+  function measureCellW(names, viewportW) {
+    const probe = document.createElement("span");
+    probe.style.cssText =
+      "position:absolute;visibility:hidden;white-space:nowrap;font-size:1.6rem;font-weight:600;";
+    document.body.appendChild(probe);
+    let w = 0;
+    for (const n of names) {
+      probe.textContent = n;
+      w = Math.max(w, probe.offsetWidth);
+    }
+    probe.remove();
+    const cap = Math.max(viewportW * 0.6, 128);
+    return Math.min(Math.max(w + 32, 128), cap);
+  }
+
+  // Deterministic pass: no name repeats within `gap` cells, so the visible
+  // window never shows the same contender twice. Built from the server's
+  // frame order, so every browser spins identically.
+  function spreadSequence(frames, gap) {
+    const seq = [];
+    for (const n of frames) {
+      if (!seq.slice(-gap).includes(n)) seq.push(n);
+    }
+    if (seq.length === 0 && frames.length > 0) seq.push(frames[0]);
+    // The sequence is looped, so its ends meet: trim a tail that would sit
+    // next to the head and render as a duplicate at every copy seam.
+    while (seq.length > 1 && seq[seq.length - 1] === seq[0]) seq.pop();
+    return seq;
+  }
+
+  function reelCell(name, cls) {
+    const d = document.createElement("div");
+    d.className = "reel-cell" + (cls ? " " + cls : "");
+    d.textContent = name;
+    return d;
+  }
+
   function animateSuspense(names) {
     if (!names || names.length === 0) return;
     const res = $("#result");
-    if (!res) return;
-    clearInterval(suspenseTimer);
-    const step = 2250 / names.length;
-    const holder = res.querySelector(".result-main");
-    if (!holder) return;
-    holder.classList.add("result-suspense");
-    holder.innerHTML = "";
-    let i = 0;
-    const paint = () => {
-      const strong = document.createElement("strong");
-      strong.textContent = names[i % names.length];
-      holder.textContent = "Drawing… ";
-      holder.appendChild(strong);
-    };
-    paint();
-    suspenseTimer = setInterval(() => {
-      i += 1;
-      paint();
-    }, step);
+    const reel = res && res.querySelector(".reel");
+    const track = reel && reel.querySelector(".reel-track");
+    const label = res && res.querySelector(".result-label");
+    const sub = res && res.querySelector(".result-sub");
+    if (!reel || !track) return;
+    clearReelTimers();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (label) label.textContent = "Drawing…";
+      track.setAttribute("aria-hidden", "true");
+      track.innerHTML = "";
+      track.appendChild(reelCell("…", "is-idle"));
+      reelState.phase = "reduced";
+      reelLater(() => {
+        if (reelState.phase === "reduced") {
+          reelState.phase = "idle";
+          refreshPartials();
+        }
+      }, 6000);
+      return;
+    }
+    const viewportW = reel.clientWidth || 300;
+    const cellW = measureCellW(names, viewportW);
+    const visibleCells = Math.max(2, Math.ceil(viewportW / cellW) + 1);
+    const seq = spreadSequence(names, visibleCells);
+    const loopW = seq.length * cellW;
+    // The strip travels exactly one sequence per cycle, so it must be at
+    // least one sequence WIDER than the viewport — otherwise the tail of
+    // each cycle scrolls past the right edge and leaves a hole. The wind-up
+    // does NOT wrap, so it has to be covered outright when it runs further
+    // than a single loop (short pools).
+    const spinDist = (REEL_CRUISE_V * REEL_SPINUP_MS) / 2;
+    const copies = Math.max(2, Math.ceil((Math.max(loopW, spinDist) + viewportW) / loopW));
+    reelState.seq = seq;
+    reelState.cellW = cellW;
+
+    reel.style.setProperty("--cell-w", cellW + "px");
+    if (label) label.textContent = "Drawing…";
+    if (sub) sub.textContent = "";
+    track.setAttribute("aria-hidden", "true");
+    track.classList.remove("cruising", "landing", "spinup");
+    track.style.transform = "";
+    track.style.transitionDuration = "";
+    track.style.animationDelay = "";
+    track.innerHTML = "";
+    for (let c = 0; c < copies; c++) {
+      for (const n of seq) track.appendChild(reelCell(n));
+    }
+    reel.classList.add("is-live");
+    // Wind up from rest, then hand over to the constant-speed loop at exactly
+    // cruise speed — accelerating over t covers v*t/2.
+    const cruiseMs = loopW / REEL_CRUISE_V;
+    requestAnimationFrame(() => {
+      track.style.setProperty("--loop-w", -loopW + "px");
+      track.style.setProperty("--cruise-dur", (cruiseMs / 1000).toFixed(3) + "s");
+      track.classList.add("spinup");
+      track.style.transitionDuration = REEL_SPINUP_MS + "ms";
+      void track.offsetWidth;
+      track.style.transform = `translateX(${-spinDist}px)`;
+      reelState.phase = "spinup";
+      startReelTicks(track, cellW);
+      // Hand over when the wind-up truly ends. A bare timer can fire while the
+      // transition still has a frame to run, which snaps the belt forward.
+      const toCruise = (e) => {
+        if (e && e.propertyName !== "transform") return;
+        track.removeEventListener("transitionend", toCruise);
+        if (reelState.phase !== "spinup") return;
+        // Enter the loop at the phase matching where the wind-up ended, via a
+        // negative delay, so neither position nor speed jumps.
+        const offset = spinDist % loopW;
+        track.style.transitionDuration = "0ms";
+        track.style.transform = "";
+        track.classList.remove("spinup");
+        track.style.animationDelay = -((offset / loopW) * cruiseMs).toFixed(1) + "ms";
+        track.classList.add("cruising");
+        reelState.phase = "cruising";
+      };
+      track.addEventListener("transitionend", toCruise);
+      reelLater(() => toCruise(), REEL_SPINUP_MS + 150);
+    });
+    // Safety: if the winner event never arrives, give up and re-render.
+    reelLater(() => {
+      if (reelState.phase === "cruising" || reelState.phase === "spinup") {
+        reelState.phase = "idle";
+        refreshPartials();
+      }
+    }, 6000);
   }
 
-  function stopSuspense() {
-    clearInterval(suspenseTimer);
-    suspenseTimer = null;
+  function landReel(winnerName) {
+    const res = $("#result");
+    const reel = res && res.querySelector(".reel");
+    const track = reel && reel.querySelector(".reel-track");
+    if (
+      !track ||
+      (reelState.phase !== "cruising" &&
+        reelState.phase !== "spinup" &&
+        reelState.phase !== "reduced")
+    ) {
+      refreshPartials();
+      return;
+    }
+    clearReelTimers();
+    if (reelState.phase === "reduced" || !winnerName) {
+      reelState.phase = "idle";
+      refreshPartials();
+      return;
+    }
+    const seq = reelState.seq || [];
+    if (seq.length === 0) {
+      reelState.phase = "idle";
+      refreshPartials();
+      return;
+    }
+    const cellW =
+      reelState.cellW || parseFloat(getComputedStyle(reel).getPropertyValue("--cell-w")) || 160;
+    const viewportW = reel.clientWidth || 300;
+    const centerOffset = (viewportW - cellW) / 2;
+    const readTraveled = () => {
+      const t = getComputedStyle(track).transform;
+      return t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t).m41) : 0;
+    };
+
+    // Freeze exactly where the belt is *before* touching the DOM, so it can't
+    // drift underneath us while the runway is built. Landing already pins
+    // justify-content, so measurements below stay valid.
+    const traveled = readTraveled();
+    track.style.transitionDuration = "0ms";
+    track.classList.remove("cruising", "spinup");
+    track.classList.add("landing");
+    track.style.transform = `translateX(${-traveled}px)`;
+
+    // Hand over from the belt's real speed (it may still be winding up), so
+    // the reveal never jumps in velocity.
+    const fresh = reelState.v && performance.now() - reelState.v.at < 120;
+    const v0 = Math.max(0.15, Math.min(REEL_CRUISE_V, fresh ? reelState.v.value : REEL_CRUISE_V));
+    // Coasting to a stop from speed v covers v*t/2. Put the winner exactly
+    // that far ahead, so the belt decelerates the whole way instead of
+    // sprinting to catch a winner parked at the end of the strip.
+    const idealDist = (v0 * REEL_LAND_MS) / 2;
+    // Everything past the right edge is invisible and can be rebuilt.
+    const firstOffscreen = Math.ceil((traveled + viewportW) / cellW);
+    while (track.children.length > firstOffscreen) track.lastElementChild.remove();
+    let winnerIdx = Math.max(
+      firstOffscreen,
+      Math.round((traveled + centerOffset + idealDist) / cellW)
+    );
+    // Never let the runway's last name duplicate the winner.
+    if (seq.length > 1 && seq[(winnerIdx - 1) % seq.length] === winnerName) winnerIdx += 1;
+    for (let i = track.children.length; i < winnerIdx; i++) {
+      track.appendChild(reelCell(seq[i % seq.length]));
+    }
+    track.appendChild(reelCell(winnerName, "is-winner"));
+    const winnerCell = track.lastElementChild;
+    const target = winnerCell.offsetLeft - track.offsetLeft - centerOffset;
+    const dist = Math.max(cellW, target - traveled);
+    // The easing starts at 2x its average slope, so this duration makes the
+    // landing begin at exactly the belt's current speed and ease to a stop.
+    const dur = Math.round(Math.min(2600, Math.max(700, (2 * dist) / v0)));
+
+    void track.offsetWidth;
+    track.style.transitionDuration = dur + "ms";
+    track.style.transform = `translateX(${-target}px)`;
+    reelState.phase = "landing";
+    // Pop only the cell we landed on; the re-rendered winner must not re-pop.
+    reelLater(() => {
+      winnerCell.classList.add("pop");
+      confettiBurst(winnerCell);
+    }, dur);
+    reelLater(() => {
+      reelState.phase = "idle";
+      refreshPartials();
+    }, dur + 420);
+  }
+
+  /* ---------- Confetti ---------- */
+  // Self-contained so the app keeps working offline (no CDN). Bursts from the
+  // winning cell, cleans up its own canvas, and stays out of the layout.
+  let confettiCanvas = null;
+
+  function confettiBurst(originEl) {
+    // Audio isn't a motion preference, so it fires either way.
+    playConfettiSound();
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!originEl || typeof originEl.getBoundingClientRect !== "function") return;
+    if (confettiCanvas) confettiCanvas.remove();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement("canvas");
+    canvas.className = "confetti-canvas";
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    document.body.appendChild(canvas);
+    confettiCanvas = canvas;
+    ctx.scale(dpr, dpr);
+
+    const r = originEl.getBoundingClientRect();
+    const ox = r.left + r.width / 2;
+    const oy = r.top + r.height / 2;
+    const colors = ["#e8b923", "#4ade80", "#d6a354", "#7dd3fc", "#f472b6", "#a78bfa"];
+    const parts = [];
+    for (let i = 0; i < 90; i++) {
+      // Fan upward and outward from the winner.
+      const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.15;
+      const speed = 4 + Math.random() * 7;
+      parts.push({
+        x: ox,
+        y: oy,
+        vx: Math.cos(angle) * speed * (0.7 + Math.random() * 0.9),
+        vy: Math.sin(angle) * speed,
+        w: 5 + Math.random() * 5,
+        h: 8 + Math.random() * 6,
+        rot: Math.random() * Math.PI,
+        vr: (Math.random() - 0.5) * 0.32,
+        color: colors[i % colors.length],
+      });
+    }
+
+    const maxLife = 1900;
+    let start = null;
+    function frame(ts) {
+      if (canvas !== confettiCanvas) return; // superseded by a newer burst
+      if (start === null) start = ts;
+      const elapsed = ts - start;
+      ctx.clearRect(0, 0, w, h);
+      let onScreen = 0;
+      for (const p of parts) {
+        p.vy += 0.22;
+        p.vx *= 0.995;
+        p.vy *= 0.995;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vr;
+        if (p.y < h + 40) onScreen++;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - elapsed / maxLife);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      }
+      if (elapsed < maxLife && onScreen > 0) {
+        requestAnimationFrame(frame);
+      } else {
+        canvas.remove();
+        if (confettiCanvas === canvas) confettiCanvas = null;
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- Wheel tick sound ---------- */
+  // Synthesised, not sampled: a filtered noise burst per cell boundary, so the
+  // app ships no audio assets and still works offline.
+  const audio = { ctx: null, noise: null };
+
+  function soundOn() {
+    return localStorage.getItem("raffle-sound") !== "off";
+  }
+
+  function audioCtx() {
+    if (!audio.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      try {
+        audio.ctx = new AC();
+      } catch {
+        return null;
+      }
+      const len = Math.floor(audio.ctx.sampleRate * 0.05);
+      const buf = audio.ctx.createBuffer(1, len, audio.ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      audio.noise = buf;
+    }
+    // Browsers start the context suspended until a user gesture.
+    if (audio.ctx.state === "suspended") audio.ctx.resume().catch(() => {});
+    return audio.ctx;
+  }
+
+  function playTick(strength) {
+    if (!soundOn()) return;
+    const ctx = audioCtx();
+    if (!ctx || ctx.state !== "running" || !audio.noise) return;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = audio.noise;
+    // Vary each strike slightly; a real flapper never hits twice the same.
+    src.playbackRate.value = 0.9 + Math.random() * 0.3;
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1800 + Math.random() * 900;
+    bp.Q.value = 1.1;
+    const gain = ctx.createGain();
+    const peak = 0.16 * (strength || 1);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(peak, t + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+    src.connect(bp).connect(gain).connect(ctx.destination);
+    src.start(t);
+    src.stop(t + 0.05);
+  }
+
+  // One tick per cell boundary crossing. Driven by the reel's real position,
+  // so the clicks thin out on their own as the belt decelerates.
+  function startReelTicks(track, cellW) {
+    if (reelState.tickRAF) cancelAnimationFrame(reelState.tickRAF);
+    let lastCell = null;
+    let lastAt = 0;
+    let prevPos = null;
+    let prevT = 0;
+    const step = () => {
+      if (
+        reelState.phase !== "spinup" &&
+        reelState.phase !== "cruising" &&
+        reelState.phase !== "landing"
+      ) {
+        reelState.tickRAF = null;
+        return;
+      }
+      const t = getComputedStyle(track).transform;
+      const pos = t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t).m41) : 0;
+      const now = performance.now();
+      // Track live speed so the landing can hand over from whatever the belt
+      // is actually doing, not from an assumed cruise speed.
+      if (prevPos !== null) {
+        const dx = pos - prevPos;
+        const dt = now - prevT;
+        if (dt > 0 && dx >= 0) reelState.v = { value: dx / dt, at: now };
+      }
+      prevPos = pos;
+      prevT = now;
+      const cell = Math.floor(pos / cellW);
+      if (lastCell === null) {
+        lastCell = cell;
+      } else if (cell !== lastCell && now - lastAt > 12) {
+        lastCell = cell;
+        lastAt = now;
+        playTick(1);
+      }
+      reelState.tickRAF = requestAnimationFrame(step);
+    };
+    reelState.tickRAF = requestAnimationFrame(step);
+  }
+
+  // Party popper: a filtered burst with a low thump under it, then glitter
+  // blips scattered across the fall. Same mute switch as the wheel ticks.
+  function playConfettiSound() {
+    if (!soundOn()) return;
+    const ctx = audioCtx();
+    if (!ctx || ctx.state !== "running" || !audio.noise) return;
+    const t0 = ctx.currentTime;
+
+    const pop = ctx.createBufferSource();
+    pop.buffer = audio.noise;
+    pop.loop = true; // the buffer is short; the envelope shapes the tail
+    pop.playbackRate.value = 0.7;
+    const popFilter = ctx.createBiquadFilter();
+    popFilter.type = "lowpass";
+    popFilter.frequency.setValueAtTime(4200, t0);
+    popFilter.frequency.exponentialRampToValueAtTime(600, t0 + 0.25);
+    const popGain = ctx.createGain();
+    popGain.gain.setValueAtTime(0.0001, t0);
+    popGain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.008);
+    popGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+    pop.connect(popFilter).connect(popGain).connect(ctx.destination);
+    pop.start(t0);
+    pop.stop(t0 + 0.34);
+
+    const thump = ctx.createOscillator();
+    thump.type = "sine";
+    thump.frequency.setValueAtTime(260, t0);
+    thump.frequency.exponentialRampToValueAtTime(70, t0 + 0.18);
+    const thumpGain = ctx.createGain();
+    thumpGain.gain.setValueAtTime(0.0001, t0);
+    thumpGain.gain.exponentialRampToValueAtTime(0.18, t0 + 0.01);
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+    thump.connect(thumpGain).connect(ctx.destination);
+    thump.start(t0);
+    thump.stop(t0 + 0.3);
+
+    for (let i = 0; i < 14; i++) {
+      const at = t0 + 0.05 + Math.random() * 0.9;
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      const f = 1400 + Math.random() * 2200;
+      osc.frequency.setValueAtTime(f, at);
+      osc.frequency.exponentialRampToValueAtTime(f * 1.5, at + 0.05);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.04 + Math.random() * 0.04, at + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(at);
+      osc.stop(at + 0.12);
+    }
+  }
+
+  function syncSoundBtn() {
+    const btn = $("#sound-toggle");
+    if (!btn) return;
+    const on = soundOn();
+    btn.classList.toggle("muted", !on);
+    btn.title = on ? "Sound on — click to mute" : "Sound muted — click to unmute";
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  function bindSoundToggle() {
+    const btn = $("#sound-toggle");
+    if (!btn) return;
+    syncSoundBtn();
+    btn.addEventListener("click", () => {
+      const next = !soundOn();
+      localStorage.setItem("raffle-sound", next ? "on" : "off");
+      syncSoundBtn();
+      // The click is a user gesture: unlock audio and preview the tick.
+      if (next) playTick(0.8);
+    });
   }
 
   /* ---------- Row mutations ---------- */
@@ -475,9 +945,8 @@
   /* ---------- WS events ---------- */
   function bindWS() {
     window.Raffle.wsOn("suspense", (data) => animateSuspense(data && data.names));
-    window.Raffle.wsOn("winner", () => {
-      stopSuspense();
-      refreshPartials();
+    window.Raffle.wsOn("winner", (data) => {
+      landReel(data && data.winner && data.winner.name);
     });
     window.Raffle.wsOn("undo", () => refreshPartials());
     window.Raffle.wsOn("entries", () => {
@@ -562,6 +1031,7 @@
     setInterval(checkDb, 5000);
     bindIEDialog();
     bindHistoryToggle();
+    bindSoundToggle();
     // #new-name lives inside the swapped table partial, so its Enter
     // handling is delegated (element-bound listeners are lost on swap).
     document.addEventListener("keydown", (e) => {

@@ -2,13 +2,23 @@
 <section id="result" class="card result" role="status">
   <div class="result-main">
     {{if .LastPick}}
-    <div class="result-winner">
-      <span class="result-label">The winner is</span>
-      <span class="result-name">{{.LastPick.EntryName}}</span>
-      <span class="result-sub">pick #{{.LastPick.PickNumber}}</span>
+    <span class="result-label">The winner is</span>
+    <div class="reel">
+      <div class="reel-track">
+        <div class="reel-cell is-winner">{{.LastPick.EntryName}}</div>
+      </div>
+      <div class="reel-frame" aria-hidden="true"></div>
     </div>
+    <span class="result-sub">pick #{{.LastPick.PickNumber}}</span>
     {{else}}
-    <div class="result-idle">Welcome to the draw!</div>
+    <span class="result-label"></span>
+    <div class="reel">
+      <div class="reel-track">
+        <div class="reel-cell is-idle">Welcome to the draw!</div>
+      </div>
+      <div class="reel-frame" aria-hidden="true"></div>
+    </div>
+    <span class="result-sub"></span>
     {{end}}
   </div>
   <div class="result-actions">

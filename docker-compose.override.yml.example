@@ -1,0 +1,18 @@
+# Local development overrides. Docker Compose merges this file automatically
+# for any `docker compose` command run in this directory.
+#
+# The base compose file points at the published GHCR image so servers (and the
+# TrueNAS app) can just pull. Locally we want the opposite: build from the
+# working tree, so uncommitted changes actually show up on :8543.
+#
+# This file is git-ignored on purpose — a clone on the NAS must NOT inherit it,
+# or the NAS would try to compile the app instead of pulling the CI image.
+#
+# Recreate with:  cp docker-compose.override.yml.example docker-compose.override.yml
+# Rebuild with:   docker compose up -d --build
+services:
+  raffle:
+    build: .
+    # Tagged separately from the GHCR image so a local build can't shadow the
+    # published tag (and `docker compose pull` can't clobber your local build).
+    image: goraffle:local

@@ -386,16 +386,35 @@ input {
   background: var(--bg-secondary);
 }
 
-#theme-toggle {
+#theme-toggle,
+#sound-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.15rem;
 }
 
-#theme-toggle svg {
+#theme-toggle svg,
+#sound-toggle svg {
   width: 16px;
   height: 16px;
+}
+
+/* Speaker shows current state: crossed-out once muted. */
+#sound-toggle .icon-sound-off {
+  display: none;
+}
+
+#sound-toggle.muted .icon-sound-on {
+  display: none;
+}
+
+#sound-toggle.muted .icon-sound-off {
+  display: block;
+}
+
+#sound-toggle.muted {
+  color: var(--text-secondary);
 }
 
 [data-theme="light"] .icon-theme-moon,
@@ -447,36 +466,159 @@ input {
   }
 }
 
-.result-winner {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
 .result-label {
+  display: block;
+  min-height: 1.2rem;
   color: var(--text-secondary);
   font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.result-name {
-  font-size: 1.6rem;
-  font-weight: 600;
-}
-
 .result-sub {
+  display: block;
+  min-height: 1rem;
   color: var(--text-secondary);
   font-size: 0.8rem;
 }
 
-.result-idle {
+/* ===== Horizontal draw reel ===== */
+.reel {
+  position: relative;
+  overflow: hidden;
+  height: 2.6rem;
+  /* Keep the spinner compact and centred rather than letting it stretch the
+     full width of the card. */
+  max-width: 28rem;
+  margin: 0 auto;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+}
+
+.reel-track {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  will-change: transform;
+}
+
+.reel-track.cruising {
+  justify-content: flex-start;
+  animation-name: reel-cruise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-duration: var(--cruise-dur, 4s);
+}
+
+.reel-track.spinup {
+  justify-content: flex-start;
+  animation: none;
+  /* Mirror of the landing curve: starts at rest (slope 0) and ends at twice
+     the average slope, i.e. exactly cruise speed. app.js sets the duration. */
+  transition: transform 900ms cubic-bezier(.55, 0, .75, .5);
+}
+
+.reel-track.landing {
+  justify-content: flex-start;
+  animation: none;
+  /* Initial slope is y1/x1 = 2, i.e. twice the average speed, which is what
+     coasting to a stop looks like. app.js sizes the duration to match, so the
+     belt leaves the cruise at exactly its cruising speed. */
+  transition: transform 600ms cubic-bezier(.25, .5, .45, 1);
+}
+
+@keyframes reel-cruise {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(var(--loop-w, 0px));
+  }
+}
+
+.reel-cell {
+  flex: 0 0 var(--cell-w, 10rem);
+  width: var(--cell-w, 10rem);
+  line-height: 2.6rem;
+  text-align: center;
+  font-size: 1.6rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Passing candidates (and the idle prompt) sit back; the winner is the
+     only name at full strength. */
   color: var(--text-secondary);
 }
 
-.result-suspense {
-  font-size: 1.1rem;
-  color: var(--text-secondary);
+.reel-cell.is-winner {
+  color: var(--text-primary);
+}
+
+.reel-cell.is-winner.pop {
+  animation: winner-pop 300ms cubic-bezier(.2, 1.4, .3, 1);
+}
+
+@keyframes winner-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* At rest a single cell centers at its natural width. */
+.reel-track .reel-cell:only-child {
+  flex-basis: auto;
+  width: auto;
+  max-width: 100%;
+}
+
+.reel-frame {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: var(--cell-w, 10rem);
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* The framed slot only appears while spinning. */
+.reel.is-live .reel-frame {
+  display: block;
+}
+
+/* Winner celebration: overlay only, never affects layout or input. */
+.confetti-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reel-track.cruising {
+    animation: none;
+  }
+  .reel-track.spinup,
+  .reel-track.landing {
+    transition: none;
+  }
+  .reel-cell.is-winner.pop {
+    animation: none;
+  }
 }
 
 /* ===== Filter accordion ===== */

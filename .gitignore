@@ -31,3 +31,8 @@ go.work.sum
 # .idea/
 # .vscode/
 /raffle
+
+# Local compose overrides (build from source instead of pulling the CI image).
+# Ignored so a clone on a server keeps using the published image.
+# Template lives in docker-compose.override.yml.example
+docker-compose.override.yml
