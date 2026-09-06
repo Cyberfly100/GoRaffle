@@ -9,18 +9,29 @@ rm -f "$LOG"
 
 go build -o raffle ./cmd/raffle || exit 1
 
+# Dedicated port: never collide with a deployed instance (e.g. the docker
+# compose app on 8543), or this script would silently test *that* server's
+# code instead of the binary built above.
+PORT=8599
+
 DATABASE_URL="postgresql://user:pass@localhost:5432/raffle?sslmode=disable" \
+  LISTEN_ADDR=":$PORT" \
   setsid ./raffle >"$LOG" 2>&1 </dev/null &
 SRV=$!
 
 # wait for server
 for i in $(seq 1 20); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8543/ 2>/dev/null || true)
+  code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/" 2>/dev/null || true)
   [ "$code" = "200" ] && break
   sleep 0.5
 done
+if [ "$code" != "200" ]; then
+  echo "FAIL: server did not come up on port $PORT"
+  cat "$LOG"
+  exit 1
+fi
 
-base=http://localhost:8543
+base=http://localhost:$PORT
 pass=0; fail=0
 check() { # check <desc> <expected> <actual>
   if [ "$2" = "$3" ]; then pass=$((pass+1)); echo "PASS: $1";
@@ -88,9 +99,16 @@ echo "=== history ==="
 hist=$(curl -s "$base/api/history")
 check "history empty" "0" "$(printf '%s' "$hist" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
 
+echo "=== list name (setup) ==="
+# The list name is user state; snapshot it and normalize to the default so the
+# export checks below are deterministic, then restore it at the end.
+orig_ln=$(curl -s "$base/api/list-name" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo Entries)
+curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"Entries"}' >/dev/null
+
 echo "=== export/import ==="
 export_json=$(curl -s "$base/api/export?format=json")
 check "export json has entries" "13" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["entries"]))' 2>/dev/null || echo ERR)"
+check "export json has list_name" "Entries" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
 curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"Bob","pick_count":2,"excluded":false,"tags":["Newbie"]},{"name":"Carol"}]}' >/dev/null
 cs2=$(curl -s "$base/api/entries")
 check "import added 2 entries (15 total)" "15" "$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
@@ -101,7 +119,35 @@ check "import set Bob tags" "Newbie" "$bobtags"
 
 echo "=== CSV export ==="
 csv=$(curl -s "$base/api/export?format=csv")
-check "csv contains header" "name" "$(printf '%s' "$csv" | head -1 | cut -d, -f1)"
+check "csv first row is list_name" "list_name" "$(printf '%s' "$csv" | head -1 | cut -d, -f1)"
+check "csv second row is column header" "name" "$(printf '%s' "$csv" | sed -n 2p | cut -d, -f1)"
+
+echo "=== list name ==="
+curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"My List"}' >/dev/null
+ln2=$(curl -s "$base/api/list-name")
+check "updated list name" "My List" "$(printf '%s' "$ln2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
+fn=$(curl -s -D - -o /dev/null "$base/api/export?format=json&name=My%20List" | grep -i '^content-disposition' | sed 's/.*filename="\([^"]*\)".*/\1/' | tr -d '\r')
+check "export filename follows list name" "My_List.json" "$fn"
+imp=$(curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"list_name":"Swapped","entries":[{"name":"ListNameTester"}]}')
+check "import response carries list_name" "Swapped" "$(printf '%s' "$imp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
+ln3=$(curl -s "$base/api/list-name")
+check "import set list name" "Swapped" "$(printf '%s' "$ln3" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
+csvname=$(curl -s "$base/api/export?format=csv" | head -1 | cut -d, -f2)
+check "csv carries list name" "Swapped" "$csvname"
+
+echo "=== CSV round-trip ==="
+# Export the current state, clear, re-import: the counts must survive and no
+# bogus "list_name" entry may appear from the header rows.
+curl -s "$base/api/export?format=csv" > /tmp/opencode/raffle_rt.csv
+before=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+curl -s -X DELETE "$base/api/entries" >/dev/null
+curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt.csv" >/dev/null
+after=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
+check "csv round-trip preserves entry count" "$before" "$after"
+bogus=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print("yes" if any(c["name"] in ("list_name","name") for c in json.load(sys.stdin)) else "no")')
+check "csv round-trip adds no header entries" "no" "$bogus"
+# restore the default so the app starts clean for the user later
+curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"Entries"}' >/dev/null
 
 echo "=== reset ==="
 curl -s -X POST "$base/api/reset" >/dev/null
@@ -126,6 +172,8 @@ check "static js ws" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/static
 
 # re-seed defaults so the app starts clean for the user later
 curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"entry 1"},{"name":"entry 2"},{"name":"entry 3"},{"name":"entry 4"},{"name":"entry 5"},{"name":"entry 6"},{"name":"entry 7"},{"name":"entry 8"},{"name":"entry 9"},{"name":"entry 10"},{"name":"entry 11"},{"name":"entry 12"}]}' >/dev/null
+# put the user's list name back the way we found it
+curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d "{\"name\":\"$orig_ln\"}" >/dev/null
 
 kill "$SRV" 2>/dev/null
 wait "$SRV" 2>/dev/null

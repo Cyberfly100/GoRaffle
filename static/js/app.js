@@ -80,10 +80,58 @@
     wrap.innerHTML = html;
     const node = wrap.content.firstElementChild;
     if (!node) return;
+
+    // Replacing the section rebuilds its scrollports (resetting their
+    // position) and drops a focused input; capture both so the table
+    // neither jumps nor steals the caret mid-edit.
+    const scroller = target.querySelector(".rows-scroll");
+    const scrollTop = scroller ? scroller.scrollTop : 0;
+    const tableEl = target.querySelector(".table");
+    const scrollLeft = tableEl ? tableEl.scrollLeft : 0;
+    const focus = captureFocus(target);
+
     target.replaceWith(node);
+
+    const newScroller = node.querySelector(".rows-scroll");
+    if (newScroller) newScroller.scrollTop = Math.min(scrollTop, newScroller.scrollHeight);
+    const newTable = node.querySelector(".table");
+    if (newTable) newTable.scrollLeft = Math.min(scrollLeft, newTable.scrollWidth);
+    restoreFocus(node, focus);
+
     if (selector === "#filter-bar") renderFilterZones();
     syncHistoryBtnLabel();
     updateEligibility();
+  }
+
+  // The swap would silently discard an edit that has not blurred yet, so the
+  // in-flight value is captured and put back after the re-render.
+  function captureFocus(target) {
+    const el = document.activeElement;
+    if (!el || !target.contains(el)) return null;
+    const row = el.closest("[data-id]");
+    return {
+      id: el.id || null,
+      rowId: row ? row.dataset.id : null,
+      field: el.dataset?.field || null,
+      value: el.value,
+      selStart: el.selectionStart,
+      selEnd: el.selectionEnd,
+    };
+  }
+
+  function restoreFocus(root, state) {
+    if (!state) return;
+    let el = null;
+    if (state.id) el = root.querySelector("#" + state.id);
+    else if (state.rowId && state.field)
+      el = root.querySelector(`[data-id="${state.rowId}"] [data-field="${state.field}"]`);
+    if (!el || typeof el.focus !== "function") return;
+    el.focus();
+    if (state.field === "pick_count" || state.field === "excluded") return;
+    el.value = state.value;
+    try {
+      el.setSelectionRange(state.selStart, state.selEnd);
+    } catch {}
   }
 
   function refreshPartials() {
@@ -146,7 +194,7 @@
   // how wide the names make the cells, and so the landing can hand over
   // without a jump in velocity. Phase lengths are tuned against the server's
   // suspenseTotal (draw.go): wind-up + cruise fill it, then the landing runs.
-  const REEL_CRUISE_V = 1.45;
+  const REEL_CRUISE_V = 2.175;
   const REEL_LAND_MS = 1800;
   const REEL_SPINUP_MS = 900;
 
@@ -951,7 +999,14 @@
       return;
     }
     toast(`Imported: ${data.added} added, ${data.updated} updated.`);
-    const input = $("#import-file");
+    if (data.list_name) {
+      const input = $("#list-name");
+      if (input) {
+        input.value = data.list_name;
+        updateExportLinks(data.list_name);
+      }
+    }
+    const fileInput = $("#import-file");
     if (input) input.value = "";
     const nameEl = $("#file-chosen");
     if (nameEl) nameEl.textContent = "No file chosen";
@@ -1027,6 +1082,8 @@
     if (!dialog) return;
     document.addEventListener("click", (e) => {
       if (e.target.closest("#ie-open-btn")) {
+        const input = $("#list-name");
+        if (input) updateExportLinks(input.value);
         dialog.showModal();
       } else if (e.target.closest("#ie-close-btn")) {
         dialog.close();
@@ -1067,7 +1124,56 @@
     });
   }
 
-  /* ---------- Init ---------- */
+  /* ---------- List Name ---------- */
+  let listNameDebounce = null;
+
+  async function loadListName() {
+    try {
+      const resp = await fetch("/api/list-name");
+      const data = await resp.json();
+      const input = $("#list-name");
+      if (input && data.name) {
+        input.value = data.name;
+        updateExportLinks(data.name);
+      }
+    } catch {
+      // Ignore errors, keep default
+    }
+  }
+
+  function updateExportLinks(name) {
+    const safeName = name.trim() || "raffle";
+    const jsonLink = document.querySelector('a[href="/api/export?format=json"]');
+    const csvLink = document.querySelector('a[href="/api/export?format=csv"]');
+    if (jsonLink) jsonLink.href = `/api/export?format=json&name=${encodeURIComponent(safeName)}`;
+    if (csvLink) csvLink.href = `/api/export?format=csv&name=${encodeURIComponent(safeName)}`;
+  }
+
+  function saveListName(name) {
+    clearTimeout(listNameDebounce);
+    listNameDebounce = setTimeout(async () => {
+      try {
+        await fetch("/api/list-name", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim() || "Entries" }),
+        });
+      } catch {
+        // Ignore
+      }
+    }, 500);
+  }
+
+  function bindListName() {
+    const input = $("#list-name");
+    if (!input) return;
+    input.addEventListener("blur", () => saveListName(input.value));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        input.blur();
+      }
+    });
+  }
   function init() {
     bindRowEvents();
     bindTagDialog();
@@ -1078,6 +1184,8 @@
     bindIEDialog();
     bindHistoryToggle();
     bindSoundToggle();
+    bindListName();
+    loadListName();
     // #new-name lives inside the swapped table partial, so its Enter
     // handling is delegated (element-bound listeners are lost on swap).
     document.addEventListener("keydown", (e) => {

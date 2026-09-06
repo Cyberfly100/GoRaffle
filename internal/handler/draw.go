@@ -15,7 +15,7 @@ import (
 
 const (
 	suspenseFrames = 30
-	suspenseTotal  = 3400 * time.Millisecond
+	suspenseTotal  = 2000 * time.Millisecond
 )
 
 func (s *Server) draw(w http.ResponseWriter, r *http.Request) {

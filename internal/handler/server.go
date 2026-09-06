@@ -70,6 +70,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /api/export", s.exportData)
 	mux.HandleFunc("GET /api/export/history", s.exportHistory)
 	mux.HandleFunc("POST /api/import", s.importData)
+	mux.HandleFunc("GET /api/list-name", s.getListName)
+	mux.HandleFunc("PUT /api/list-name", s.setListName)
 	mux.HandleFunc("GET /api/health", s.health)
 
 	// WebSocket

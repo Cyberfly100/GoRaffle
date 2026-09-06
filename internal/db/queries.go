@@ -19,6 +19,28 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.DB.PingContext(ctx)
 }
 
+// GetListName returns the current list name from settings.
+func (s *Store) GetListName(ctx context.Context) (string, error) {
+	var name string
+	err := s.DB.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = 'list_name'`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "Entries", nil
+	}
+	return name, err
+}
+
+// SetListName updates the list name in settings.
+func (s *Store) SetListName(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "Entries"
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		INSERT INTO settings (key, value) VALUES ('list_name', $1)
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, name)
+	return err
+}
+
 // querier spans *sql.DB and *sql.Tx for the operations we need.
 type querier interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)

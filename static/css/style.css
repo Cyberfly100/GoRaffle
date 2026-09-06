@@ -11,7 +11,7 @@
   --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.08);
   --radius-lg: 12px;
   --radius-md: 8px;
-  /* Muted tag palette (light) */
+  /* Muted tag palette (light) - 24 colors */
   --tag-color-0: #dbeafe;
   --tag-color-1: #ccfbf1;
   --tag-color-2: #fef3c7;
@@ -20,6 +20,22 @@
   --tag-color-5: #dcfce7;
   --tag-color-6: #fef9c3;
   --tag-color-7: #e2e8f0;
+  --tag-color-8: #fce7f3;
+  --tag-color-9: #ffedd5;
+  --tag-color-10: #ecfdf5;
+  --tag-color-11: #faf5ff;
+  --tag-color-12: #f0fdf4;
+  --tag-color-13: #fff7ed;
+  --tag-color-14: #f8fafc;
+  --tag-color-15: #fdf4ff;
+  --tag-color-16: #e0f2fe;
+  --tag-color-17: #fefce8;
+  --tag-color-18: #fff1f2;
+  --tag-color-19: #f3f4f6;
+  --tag-color-20: #eef2ff;
+  --tag-color-21: #f0f9ff;
+  --tag-color-22: #fef0e2;
+  --tag-color-23: #fae8ff;
 }
 
 /* ===== Tokens: dark (browser preference) ===== */
@@ -34,7 +50,7 @@
     --accent: #a8a29e;
     --accent-hover: #d6d3d1;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
-    /* Muted tag palette (dark) */
+    /* Muted tag palette (dark) - 24 colors */
     --tag-color-0: #1e3a5f;
     --tag-color-1: #134e4a;
     --tag-color-2: #78350f;
@@ -43,6 +59,22 @@
     --tag-color-5: #14532d;
     --tag-color-6: #3f6212;
     --tag-color-7: #1e293b;
+    --tag-color-8: #831843;
+    --tag-color-9: #7c2d12;
+    --tag-color-10: #052e16;
+    --tag-color-11: #2e1065;
+    --tag-color-12: #052e16;
+    --tag-color-13: #431407;
+    --tag-color-14: #0f172a;
+    --tag-color-15: #6b1b4c;
+    --tag-color-16: #0c4a6e;
+    --tag-color-17: #365314;
+    --tag-color-18: #450a0a;
+    --tag-color-19: #1f2937;
+    --tag-color-20: #1e1b4b;
+    --tag-color-21: #082f49;
+    --tag-color-22: #43200a;
+    --tag-color-23: #581c87;
   }
 }
 
@@ -57,7 +89,7 @@
   --accent: #a8a29e;
   --accent-hover: #d6d3d1;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
-  /* Muted tag palette (dark) */
+  /* Muted tag palette (dark) - 24 colors */
   --tag-color-0: #1e3a5f;
   --tag-color-1: #134e4a;
   --tag-color-2: #78350f;
@@ -66,6 +98,22 @@
   --tag-color-5: #14532d;
   --tag-color-6: #3f6212;
   --tag-color-7: #1e293b;
+  --tag-color-8: #831843;
+  --tag-color-9: #7c2d12;
+  --tag-color-10: #052e16;
+  --tag-color-11: #2e1065;
+  --tag-color-12: #052e16;
+  --tag-color-13: #431407;
+  --tag-color-14: #0f172a;
+  --tag-color-15: #6b1b4c;
+  --tag-color-16: #0c4a6e;
+  --tag-color-17: #365314;
+  --tag-color-18: #450a0a;
+  --tag-color-19: #1f2937;
+  --tag-color-20: #1e1b4b;
+  --tag-color-21: #082f49;
+  --tag-color-22: #43200a;
+  --tag-color-23: #581c87;
 }
 
 [data-theme="light"] {
@@ -308,6 +356,25 @@ input {
 
 .card-header h2 {
   margin-bottom: 0;
+}
+
+.list-name-input {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+  padding: 0.35rem 0.6rem;
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 120px;
+  max-width: 280px;
+  transition: border-color 200ms ease, background 200ms ease;
+}
+
+.list-name-input:focus {
+  border-color: var(--accent);
+  outline: none;
+  background: var(--bg-surface);
 }
 
 .header-actions {
@@ -909,7 +976,7 @@ input {
 }
 
 /* Muted per-theme tag palette; text stays the standard color for the mode.
-   Colors are picked per tag on the server (tagClass -> tc-0..tc-7). */
+   Colors are picked per tag on the server (tagClass -> tc-0..tc-23). */
 .tc-0 { --tag-bg: var(--tag-color-0); }
 .tc-1 { --tag-bg: var(--tag-color-1); }
 .tc-2 { --tag-bg: var(--tag-color-2); }
@@ -918,6 +985,22 @@ input {
 .tc-5 { --tag-bg: var(--tag-color-5); }
 .tc-6 { --tag-bg: var(--tag-color-6); }
 .tc-7 { --tag-bg: var(--tag-color-7); }
+.tc-8 { --tag-bg: var(--tag-color-8); }
+.tc-9 { --tag-bg: var(--tag-color-9); }
+.tc-10 { --tag-bg: var(--tag-color-10); }
+.tc-11 { --tag-bg: var(--tag-color-11); }
+.tc-12 { --tag-bg: var(--tag-color-12); }
+.tc-13 { --tag-bg: var(--tag-color-13); }
+.tc-14 { --tag-bg: var(--tag-color-14); }
+.tc-15 { --tag-bg: var(--tag-color-15); }
+.tc-16 { --tag-bg: var(--tag-color-16); }
+.tc-17 { --tag-bg: var(--tag-color-17); }
+.tc-18 { --tag-bg: var(--tag-color-18); }
+.tc-19 { --tag-bg: var(--tag-color-19); }
+.tc-20 { --tag-bg: var(--tag-color-20); }
+.tc-21 { --tag-bg: var(--tag-color-21); }
+.tc-22 { --tag-bg: var(--tag-color-22); }
+.tc-23 { --tag-bg: var(--tag-color-23); }
 
 /* Entries excluded from the next draw (exclude flag or tag filter) */
 .row-ineligible {

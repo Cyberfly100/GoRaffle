@@ -28,6 +28,10 @@ type pageData struct {
 var tagPalette = []string{
 	"tc-0", "tc-1", "tc-2", "tc-3",
 	"tc-4", "tc-5", "tc-6", "tc-7",
+	"tc-8", "tc-9", "tc-10", "tc-11",
+	"tc-12", "tc-13", "tc-14", "tc-15",
+	"tc-16", "tc-17", "tc-18", "tc-19",
+	"tc-20", "tc-21", "tc-22", "tc-23",
 }
 
 // LoadTemplates parses all templates from the given filesystem (the templates/
