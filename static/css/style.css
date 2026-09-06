@@ -171,25 +171,7 @@ input {
   height: 18px;
 }
 
-/* Left indicator (db): a link figure whose glyph tracks db state */
-.db-icon .icon-unlink {
-  display: none;
-}
-
-.db-icon .icon-link {
-  display: block;
-}
-
-.db-icon.db-ok .icon-link,
-.db-icon.db-down .icon-unlink {
-  display: block;
-}
-
-.db-icon.db-ok .icon-unlink,
-.db-icon.db-down .icon-link {
-  display: none;
-}
-
+/* Left indicator (db): a database figure, colored by db state */
 .db-icon.db-ok {
   color: #4ade80;
   opacity: 1;
@@ -200,9 +182,23 @@ input {
   opacity: 1;
 }
 
-/* Right indicator (ws): a db figure, colored by connection state */
-.ws-dot svg {
+/* Right indicator (ws): a link figure whose glyph tracks connection state */
+.ws-dot .icon-link {
+  display: none;
+}
+
+.ws-dot .icon-unlink {
   display: block;
+}
+
+.ws-dot.connected .icon-link,
+.ws-dot.reconnecting .icon-unlink {
+  display: block;
+}
+
+.ws-dot.connected .icon-unlink,
+.ws-dot.reconnecting .icon-link {
+  display: none;
 }
 
 .ws-dot.connected {

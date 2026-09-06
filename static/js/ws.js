@@ -17,7 +17,9 @@
 
   function setStatus(cls) {
     const el = document.getElementById("ws-status");
-    if (el) el.className = "ws-dot " + cls;
+    if (!el) return;
+    el.className = "ws-dot " + cls;
+    el.title = cls === "connected" ? "backend connected" : "backend reconnecting";
   }
 
   function connect() {
