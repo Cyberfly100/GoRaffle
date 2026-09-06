@@ -224,13 +224,17 @@
     const visibleCells = Math.max(2, Math.ceil(viewportW / cellW) + 1);
     const seq = spreadSequence(names, visibleCells);
     const loopW = seq.length * cellW;
-    // The strip travels exactly one sequence per cycle, so it must be at
-    // least one sequence WIDER than the viewport — otherwise the tail of
-    // each cycle scrolls past the right edge and leaves a hole. The wind-up
-    // does NOT wrap, so it has to be covered outright when it runs further
-    // than a single loop (short pools).
     const spinDist = (REEL_CRUISE_V * REEL_SPINUP_MS) / 2;
-    const copies = Math.max(2, Math.ceil((Math.max(loopW, spinDist) + viewportW) / loopW));
+
+    // Keep the name that is already on screen and queue the new ones to its
+    // right, so the strip grows out of the current state rather than
+    // replacing it with a full row of names on both sides.
+    const shown = track.querySelector(".reel-cell");
+    const leadName = shown ? shown.textContent : "";
+    const leadCls = shown && shown.classList.contains("is-winner") ? "is-winner" : "is-idle";
+    // Rotating the cycle keeps the queue from opening with the very name the
+    // lead cell is already showing. Adjacency within the cycle is unchanged.
+    if (seq.length > 1 && seq[0] === leadName) seq.push(seq.shift());
     reelState.seq = seq;
     reelState.cellW = cellW;
 
@@ -243,20 +247,47 @@
     track.style.transitionDuration = "";
     track.style.animationDelay = "";
     track.innerHTML = "";
+
+    const lead = document.createElement("div");
+    lead.className = "reel-lead";
+    track.appendChild(lead);
+    const leadCell = reelCell(leadName, "is-prefix " + leadCls);
+    track.appendChild(leadCell);
+    // Centre the existing name where it already sits; the queue starts after it.
+    lead.style.width = Math.max(0, (viewportW - leadCell.offsetWidth) / 2) + "px";
+    const base = lead.offsetWidth + leadCell.offsetWidth;
+    reelState.base = base;
+
+    // The strip travels exactly one sequence per cycle, so it must be at
+    // least one sequence WIDER than the viewport — otherwise the tail of
+    // each cycle scrolls past the right edge and leaves a hole. The wind-up
+    // does NOT wrap, so it has to be covered outright when it runs further
+    // than a single loop (short pools).
+    const copies = Math.max(
+      2,
+      Math.ceil((Math.max(loopW, spinDist - base) + viewportW) / loopW)
+    );
     for (let c = 0; c < copies; c++) {
-      for (const n of seq) track.appendChild(reelCell(n));
+      for (const n of seq) track.appendChild(reelCell(n, "fade-in"));
     }
+    // Pin the strip to flex-start in the SAME frame it is built. The resting
+    // rule centres the track, which would splash the over-wide strip across
+    // both sides of the slot for one frame before the wind-up begins.
+    track.classList.add("spinup");
     reel.classList.add("is-live");
     // Wind up from rest, then hand over to the constant-speed loop at exactly
     // cruise speed — accelerating over t covers v*t/2.
     const cruiseMs = loopW / REEL_CRUISE_V;
     requestAnimationFrame(() => {
-      track.style.setProperty("--loop-w", -loopW + "px");
+      // The loop runs entirely past the lead cell, where the strip repeats.
+      track.style.setProperty("--loop-from", -base + "px");
+      track.style.setProperty("--loop-to", -(base + loopW) + "px");
       track.style.setProperty("--cruise-dur", (cruiseMs / 1000).toFixed(3) + "s");
       track.classList.add("spinup");
       track.style.transitionDuration = REEL_SPINUP_MS + "ms";
       void track.offsetWidth;
       track.style.transform = `translateX(${-spinDist}px)`;
+      const windupStart = performance.now();
       reelState.phase = "spinup";
       startReelTicks(track, cellW);
       // Hand over when the wind-up truly ends. A bare timer can fire while the
@@ -266,12 +297,16 @@
         track.removeEventListener("transitionend", toCruise);
         if (reelState.phase !== "spinup") return;
         // Enter the loop at the phase matching where the wind-up ended, via a
-        // negative delay, so neither position nor speed jumps.
-        const offset = spinDist % loopW;
+        // negative delay, so neither position nor speed jumps. transitionend
+        // lands a frame after the transition actually stopped, so advance the
+        // phase by that dead time or the belt loses a frame of travel.
+        const rel = spinDist >= base ? (spinDist - base) % loopW : 0;
+        const relMs = (rel / loopW) * cruiseMs;
+        const lost = Math.max(0, performance.now() - (windupStart + REEL_SPINUP_MS));
         track.style.transitionDuration = "0ms";
         track.style.transform = "";
         track.classList.remove("spinup");
-        track.style.animationDelay = -((offset / loopW) * cruiseMs).toFixed(1) + "ms";
+        track.style.animationDelay = -(relMs + lost).toFixed(1) + "ms";
         track.classList.add("cruising");
         reelState.phase = "cruising";
       };
@@ -338,21 +373,32 @@
     // that far ahead, so the belt decelerates the whole way instead of
     // sprinting to catch a winner parked at the end of the strip.
     const idealDist = (v0 * REEL_LAND_MS) / 2;
-    // Everything past the right edge is invisible and can be rebuilt.
-    const firstOffscreen = Math.ceil((traveled + viewportW) / cellW);
-    while (track.children.length > firstOffscreen) track.lastElementChild.remove();
-    let winnerIdx = Math.max(
-      firstOffscreen,
-      Math.round((traveled + centerOffset + idealDist) / cellW)
+    // Sequence cells sit on a grid starting after the lead cell: grid j is at
+    // base + j*cellW. Everything past the right edge is invisible and can be
+    // rebuilt (never drop the lead spacer or the lead cell).
+    const base = reelState.base || 0;
+    const originLeft = track.offsetLeft;
+    while (
+      track.children.length > 2 &&
+      track.lastElementChild.offsetLeft - originLeft >= traveled + viewportW
+    ) {
+      track.lastElementChild.remove();
+    }
+    const existing = Math.max(0, track.children.length - 2);
+    let grid = Math.max(
+      existing,
+      Math.round((traveled + centerOffset + idealDist - base) / cellW)
     );
     // Never let the runway's last name duplicate the winner.
-    if (seq.length > 1 && seq[(winnerIdx - 1) % seq.length] === winnerName) winnerIdx += 1;
-    for (let i = track.children.length; i < winnerIdx; i++) {
+    if (seq.length > 1 && seq[((grid - 1) % seq.length + seq.length) % seq.length] === winnerName) {
+      grid += 1;
+    }
+    for (let i = existing; i < grid; i++) {
       track.appendChild(reelCell(seq[i % seq.length]));
     }
     track.appendChild(reelCell(winnerName, "is-winner"));
     const winnerCell = track.lastElementChild;
-    const target = winnerCell.offsetLeft - track.offsetLeft - centerOffset;
+    const target = winnerCell.offsetLeft - originLeft - centerOffset;
     const dist = Math.max(cellW, target - traveled);
     // The easing starts at 2x its average slope, so this duration makes the
     // landing begin at exactly the belt's current speed and ease to a stop.
