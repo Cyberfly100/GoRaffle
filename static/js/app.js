@@ -92,11 +92,17 @@
 
     target.replaceWith(node);
 
+    // Fit the name fields (and restore any in-flight edit, which also changes
+    // their height) BEFORE pinning the scrollports, so the saved offsets are
+    // applied and clamped against the final layout, not the collapsed
+    // one-line textareas.
+    restoreFocus(node, focus);
+    syncNameFieldHeights(node);
+
     const newScroller = node.querySelector(".rows-scroll");
     if (newScroller) newScroller.scrollTop = Math.min(scrollTop, newScroller.scrollHeight);
     const newTable = node.querySelector(".table");
     if (newTable) newTable.scrollLeft = Math.min(scrollLeft, newTable.scrollWidth);
-    restoreFocus(node, focus);
 
     if (selector === "#filter-bar") renderFilterZones();
     syncHistoryBtnLabel();
@@ -194,7 +200,7 @@
   // how wide the names make the cells, and so the landing can hand over
   // without a jump in velocity. Phase lengths are tuned against the server's
   // suspenseTotal (draw.go): wind-up + cruise fill it, then the landing runs.
-  const REEL_CRUISE_V = 2.175;
+  const REEL_CRUISE_V = 4.35;
   const REEL_LAND_MS = 1800;
   const REEL_SPINUP_MS = 900;
 
@@ -719,6 +725,19 @@
   }
 
   /* ---------- Row mutations ---------- */
+  // Textarea name cells size themselves to their content so wrapped names
+  // show every line instead of clipping.
+  function fitNameField(el) {
+    el.style.height = "auto";
+    // +2 covers the borders, which border-box height includes but
+    // scrollHeight does not.
+    el.style.height = el.scrollHeight + 2 + "px";
+  }
+
+  function syncNameFieldHeights(root) {
+    for (const el of (root || document).querySelectorAll("textarea.cell.name")) fitNameField(el);
+  }
+
   async function patchRow(field, id, value) {
     const body = {};
     if (field === "excluded") body.excluded = !!value;
@@ -745,6 +764,21 @@
       // Checkboxes report their checked state, not the value attribute.
       const val = el.type === "checkbox" ? el.checked : el.value;
       patchRow(field, row.dataset.id, val);
+    });
+
+    document.addEventListener("input", (e) => {
+      if (e.target instanceof HTMLTextAreaElement && e.target.classList.contains("cell")) {
+        fitNameField(e.target);
+      }
+    });
+
+    // Enter commits a rename (blur fires the change handler); Shift+Enter
+    // still inserts a literal line break.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && e.target instanceof HTMLTextAreaElement && e.target.classList.contains("cell")) {
+        e.preventDefault();
+        e.target.blur();
+      }
     });
 
     document.addEventListener("change", (e) => {
@@ -1176,6 +1210,7 @@
   }
   function init() {
     bindRowEvents();
+    syncNameFieldHeights();
     bindTagDialog();
     bindFilter();
     bindWS();

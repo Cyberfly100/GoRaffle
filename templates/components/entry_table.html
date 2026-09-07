@@ -11,7 +11,7 @@
     <div id="entry-table-body" class="rows-scroll">
       {{range $c := .Entries}}
       <div class="row" data-id="{{$c.ID}}">
-        <input class="cell name" name="name" value="{{$c.Name}}" data-field="name" title="Click to rename">
+        <textarea class="cell name" name="name" rows="1" data-field="name" title="Click to rename">{{$c.Name}}</textarea>
         <input class="cell count" name="pick_count" type="number" min="0" value="{{$c.PickCount}}" data-field="pick_count" title="Click to edit">
         <label class="cell excl">
           <input type="checkbox" name="excluded" value="true" data-field="excluded" {{if $c.Excluded}}checked{{end}}>

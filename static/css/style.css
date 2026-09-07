@@ -906,6 +906,19 @@ input {
   width: 72px;
 }
 
+/* Long names wrap to more lines instead of being cut off; app.js sizes the
+   height to the content, so the field grows as the name wraps. */
+textarea.cell.name {
+  display: block;
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+  font-family: inherit;
+  color: var(--text-primary);
+}
+
 .cell.excl {
   display: flex;
   align-items: center;
