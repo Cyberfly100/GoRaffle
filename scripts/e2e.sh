@@ -3,7 +3,7 @@
 # the HTTP API, then stops the server. All output is captured.
 set -uo pipefail
 
-cd /home/lucas/Documents/Projects/GoRaffle || exit 1
+cd "$(dirname "$0")/.." || exit 1
 LOG=/tmp/opencode/raffle_e2e.log
 rm -f "$LOG"
 
