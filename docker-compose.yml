@@ -21,7 +21,7 @@ services:
       # Point PGDATA_DIR at a NAS dataset (e.g. /mnt/tank/apps/goraffle/pgdata)
       # so DB files live where your NAS snapshots/backups cover them.
       # Unset = plain Docker volume.
-      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql/data
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql
     ports:
       - "5432:5432"
     healthcheck:
