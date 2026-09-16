@@ -305,6 +305,35 @@ input {
   transition: none !important;
 }
 
+/* ===== Entries show/hide =====
+   The entries card collapses vertically: animating grid-template-rows from
+   1fr to 0fr slides it shut at any content height (the card must not enforce
+   its own min-height or the grid item would refuse to shrink). The card's
+   usual bottom margin moves to the wrapper so the gap closes with it. */
+.entries-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-bottom: 1.25rem;
+  transition: grid-template-rows 250ms ease, margin-bottom 250ms ease, opacity 200ms ease;
+}
+
+.entries-collapse > .card {
+  overflow: hidden;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.no-entries .entries-collapse {
+  grid-template-rows: 0fr;
+  margin-bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.grid-no-anim .entries-collapse {
+  transition: none !important;
+}
+
 @media (max-width: 760px) {
   .grid {
     flex-direction: column;

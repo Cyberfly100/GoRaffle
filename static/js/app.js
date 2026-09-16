@@ -106,6 +106,7 @@
 
     if (selector === "#filter-bar") renderFilterZones();
     syncHistoryBtnLabel();
+    syncEntriesBtnLabel();
     updateEligibility();
   }
 
@@ -1158,6 +1159,37 @@
     });
   }
 
+  /* ---------- Entries show/hide ---------- */
+  function syncEntriesBtnLabel() {
+    const btn = $("#entries-toggle-btn");
+    if (!btn) return;
+    btn.textContent =
+      localStorage.getItem("raffle-entries-visible") === "1" ? "Hide entries" : "Show entries";
+  }
+
+  function setEntriesVisible(visible, animate) {
+    const grid = $(".grid");
+    if (!grid) return;
+    if (!animate) grid.classList.add("grid-no-anim");
+    grid.classList.toggle("no-entries", !visible);
+    if (!animate) requestAnimationFrame(() => grid.classList.remove("grid-no-anim"));
+    syncEntriesBtnLabel();
+  }
+
+  function bindEntriesToggle() {
+    const saved = localStorage.getItem("raffle-entries-visible") === "1";
+    setEntriesVisible(saved, false);
+    // #entries-toggle-btn lives in the swapped result partial, so handle it
+    // via delegation rather than a direct listener.
+    document.addEventListener("click", (e) => {
+      if (e.target.closest("#entries-toggle-btn")) {
+        const next = localStorage.getItem("raffle-entries-visible") !== "1";
+        localStorage.setItem("raffle-entries-visible", next ? "1" : "0");
+        setEntriesVisible(next, true);
+      }
+    });
+  }
+
   /* ---------- List Name ---------- */
   let listNameDebounce = null;
 
@@ -1218,6 +1250,7 @@
     setInterval(checkDb, 5000);
     bindIEDialog();
     bindHistoryToggle();
+    bindEntriesToggle();
     bindSoundToggle();
     bindListName();
     loadListName();

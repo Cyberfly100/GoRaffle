@@ -1,8 +1,9 @@
 {{define "content"}}
-<div class="grid no-history">
+<div class="grid no-history no-entries">
   <div class="col-main">
     {{template "partial:result" .}}
 
+    <div class="entries-collapse">
     <section class="card">
       <div class="card-header">
         <input type="text" id="list-name" class="list-name-input" value="Entries" aria-label="List name">
@@ -24,6 +25,7 @@
 
       {{template "partial:entry_table" .}}
     </section>
+    </div>
   </div>
 
   <aside class="col-side">

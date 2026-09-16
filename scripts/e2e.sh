@@ -53,6 +53,8 @@ check "index loads" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/")"
 [ "$(contains 'id="entry-table"')" = "YES" ] && { pass=$((pass+1)); echo "PASS: table section"; } || { fail=$((fail+1)); echo "FAIL: table section"; }
 [ "$(contains 'id="filter-bar"')" = "YES" ] && { pass=$((pass+1)); echo "PASS: filter bar"; } || { fail=$((fail+1)); echo "FAIL: filter bar"; }
 [ "$(contains 'id="history"')" = "YES" ] && { pass=$((pass+1)); echo "PASS: history"; } || { fail=$((fail+1)); echo "FAIL: history"; }
+[ "$(contains 'id="entries-toggle-btn"')" = "YES" ] && { pass=$((pass+1)); echo "PASS: entries toggle button"; } || { fail=$((fail+1)); echo "FAIL: entries toggle button"; }
+[ "$(contains 'entries-collapse')" = "YES" ] && { pass=$((pass+1)); echo "PASS: entries collapse wrapper"; } || { fail=$((fail+1)); echo "FAIL: entries collapse wrapper"; }
 
 echo "=== entries ==="
 cs=$(curl -s "$base/api/entries")
