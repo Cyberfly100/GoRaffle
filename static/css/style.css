@@ -487,9 +487,23 @@ input {
 }
 
 #theme-toggle svg,
-#sound-toggle svg {
+#sound-toggle svg,
+#reel-toggle svg {
   width: 16px;
   height: 16px;
+}
+
+/* Reel toggle shows the icon of the orientation it would switch away from. */
+#reel-toggle .icon-reel-v {
+  display: none;
+}
+
+.reel-vertical #reel-toggle .icon-reel-v {
+  display: block;
+}
+
+.reel-vertical #reel-toggle .icon-reel-h {
+  display: none;
 }
 
 /* Speaker shows current state: crossed-out once muted. */
@@ -716,6 +730,85 @@ input {
 /* The framed slot only appears while spinning. */
 .reel.is-live .reel-frame {
   display: block;
+}
+
+/* ===== Vertical reel =====
+   body.reel-vertical flips the belt's axis: cells stack in a column, the
+   strip travels on Y, and the window is taller so more names pass at once.
+   JS sets the same custom properties (--cell-h, --loop-from/to) it uses for
+   the horizontal belt; only the axis-specific rendering changes here. */
+/* The mask only clips the strip; the drum illusion comes from ::after, which
+   paints the surface colour over the belt toward both ends — exactly how iOS
+   pickers blend their rows into the background. Because the overlay uses the
+   card's own colour, the fade always matches the theme and never reads as a
+   foreign shadow; the eased stops make the falloff read as curvature. */
+.reel-vertical .reel {
+  height: 9rem;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 10%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 10%, #000 90%, transparent 100%);
+}
+
+.reel-vertical .reel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    var(--bg-surface),
+    color-mix(in srgb, var(--bg-surface), transparent 12%) 10%,
+    color-mix(in srgb, var(--bg-surface), transparent 55%) 22%,
+    color-mix(in srgb, var(--bg-surface), transparent 88%) 32%,
+    transparent 38%,
+    transparent 62%,
+    color-mix(in srgb, var(--bg-surface), transparent 88%) 68%,
+    color-mix(in srgb, var(--bg-surface), transparent 55%) 78%,
+    color-mix(in srgb, var(--bg-surface), transparent 12%) 90%,
+    var(--bg-surface)
+  );
+}
+
+.reel-vertical .reel-track {
+  flex-direction: column;
+}
+
+.reel-vertical .reel-track.cruising {
+  animation-name: reel-cruise-v;
+}
+
+.reel-vertical .reel-cell {
+  flex: 0 0 var(--cell-h, 3rem);
+  width: 100%;
+  line-height: 3rem;
+}
+
+.reel-vertical .reel-cell.is-prefix {
+  flex-basis: auto;
+  width: 100%;
+}
+
+/* At rest a single cell centers at its natural height. */
+.reel-vertical .reel-track .reel-cell:only-child {
+  flex-basis: auto;
+  width: 100%;
+  max-width: 100%;
+}
+
+.reel-vertical .reel-frame {
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 100%;
+  height: var(--cell-h, 3rem);
+}
+
+@keyframes reel-cruise-v {
+  from {
+    transform: translateY(var(--loop-from, 0px));
+  }
+  to {
+    transform: translateY(var(--loop-to, 0px));
+  }
 }
 
 /* Winner celebration: overlay only, never affects layout or input. */

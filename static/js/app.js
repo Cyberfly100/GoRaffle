@@ -108,6 +108,7 @@
     syncHistoryBtnLabel();
     syncEntriesBtnLabel();
     updateEligibility();
+    if (selector === "#result") dressVerticalReel();
   }
 
   // The swap would silently discard an edit that has not blurred yet, so the
@@ -196,7 +197,15 @@
   /* ---------- Suspense reel ---------- */
   // Horizontal slot-machine reel. The server sends name frames over WS;
   // the client spins them, then lands on the winner when its event arrives.
-  const reelState = { phase: "idle", timers: [], seq: [], cellW: 0, tickRAF: null };
+  const reelState = {
+    phase: "idle",
+    timers: [],
+    seq: [],
+    cellSize: 0,
+    tickRAF: null,
+    restNeighbors: null,
+    headCount: 2,
+  };
   // Belt speed is a constant px/ms so the reel reads the same regardless of
   // how wide the names make the cells, and so the landing can hand over
   // without a jump in velocity. Phase lengths are tuned against the server's
@@ -214,18 +223,51 @@
     reelState.timers = [];
   }
 
-  function measureCellW(names, viewportW) {
+  // The belt runs on whichever axis the body class selects; every position,
+  // size and transform read funnels through this descriptor so the spin,
+  // cruise and landing math is shared between both orientations.
+  function reelAxis() {
+    return document.body.classList.contains("reel-vertical")
+      ? {
+          t: "translateY",
+          mat: "m42",
+          off: "offsetTop",
+          size: "offsetHeight",
+          cssSize: "height",
+          vp: "clientHeight",
+          cellVar: "--cell-h",
+        }
+      : {
+          t: "translateX",
+          mat: "m41",
+          off: "offsetLeft",
+          size: "offsetWidth",
+          cssSize: "width",
+          vp: "clientWidth",
+          cellVar: "--cell-w",
+        };
+  }
+
+  function measureCell(names, viewport, vertical) {
     const probe = document.createElement("span");
     probe.style.cssText =
-      "position:absolute;visibility:hidden;white-space:nowrap;font-size:1.6rem;font-weight:600;";
+      "position:absolute;visibility:hidden;white-space:nowrap;font-size:1.6rem;font-weight:600;" +
+      (vertical ? "line-height:3rem;" : "");
     document.body.appendChild(probe);
+    if (vertical) {
+      // Vertical cells all share one height (the cell line-height), so one
+      // probe of a row is the cell size.
+      const h = Math.max(probe.offsetHeight || 0, 48);
+      probe.remove();
+      return h;
+    }
     let w = 0;
     for (const n of names) {
       probe.textContent = n;
       w = Math.max(w, probe.offsetWidth);
     }
     probe.remove();
-    const cap = Math.max(viewportW * 0.6, 128);
+    const cap = Math.max(viewport * 0.6, 128);
     return Math.min(Math.max(w + 32, 128), cap);
   }
 
@@ -274,26 +316,47 @@
       }, 6000);
       return;
     }
-    const viewportW = reel.clientWidth || 300;
-    const cellW = measureCellW(names, viewportW);
-    const visibleCells = Math.max(2, Math.ceil(viewportW / cellW) + 1);
+    const ax = reelAxis();
+    const viewport = reel[ax.vp] || 300;
+    const cellSize = measureCell(names, viewport, document.body.classList.contains("reel-vertical"));
+    const visibleCells = Math.max(2, Math.ceil(viewport / cellSize) + 1);
     const seq = spreadSequence(names, visibleCells);
-    const loopW = seq.length * cellW;
+    const loopLen = seq.length * cellSize;
     const spinDist = (REEL_CRUISE_V * REEL_SPINUP_MS) / 2;
 
-    // Keep the name that is already on screen and queue the new ones to its
-    // right, so the strip grows out of the current state rather than
-    // replacing it with a full row of names on both sides.
-    const shown = track.querySelector(".reel-cell");
+    // Keep the name that is already on screen — the resting winner, not a
+    // dressed drum row — plus the rows flanking it, so the spin's first
+    // frame is identical to the resting one and the belt grows out of it.
+    const shown =
+      track.querySelector(".reel-cell.is-winner") || track.querySelector(".reel-cell");
     const leadName = shown ? shown.textContent : "";
     const leadCls = shown && shown.classList.contains("is-winner") ? "is-winner" : "is-idle";
-    // Rotating the cycle keeps the queue from opening with the very name the
-    // lead cell is already showing. Adjacency within the cycle is unchanged.
-    if (seq.length > 1 && seq[0] === leadName) seq.push(seq.shift());
+    const carryBefore = [];
+    const carryAfter = [];
+    if (shown) {
+      let pe = shown.previousElementSibling;
+      while (pe && pe.classList.contains("reel-cell") && carryBefore.length < 3) {
+        carryBefore.unshift(pe.textContent);
+        pe = pe.previousElementSibling;
+      }
+      let ne = shown.nextElementSibling;
+      while (ne && ne.classList.contains("reel-cell") && carryAfter.length < 3) {
+        carryAfter.push(ne.textContent);
+        ne = ne.nextElementSibling;
+      }
+    }
+    // Rotating the cycle keeps the queue from opening with a name that
+    // already sits at the seam (the lead, or the last carried row).
+    // Adjacency within the cycle is unchanged.
+    const lastCarried = carryAfter.length ? carryAfter[carryAfter.length - 1] : null;
+    for (let g = 0; seq.length > 1 && g < seq.length; g++) {
+      if (seq[0] !== leadName && seq[0] !== lastCarried) break;
+      seq.push(seq.shift());
+    }
     reelState.seq = seq;
-    reelState.cellW = cellW;
+    reelState.cellSize = cellSize;
 
-    reel.style.setProperty("--cell-w", cellW + "px");
+    reel.style.setProperty(ax.cellVar, cellSize + "px");
     if (label) label.textContent = "Drawing…";
     if (sub) sub.textContent = "";
     track.setAttribute("aria-hidden", "true");
@@ -307,11 +370,30 @@
     lead.className = "reel-lead";
     track.appendChild(lead);
     const leadCell = reelCell(leadName, "is-prefix " + leadCls);
-    track.appendChild(leadCell);
-    // Centre the existing name where it already sits; the queue starts after it.
-    lead.style.width = Math.max(0, (viewportW - leadCell.offsetWidth) / 2) + "px";
-    const base = lead.offsetWidth + leadCell.offsetWidth;
+    const beforeCells = carryBefore.map((n) => reelCell(n));
+    const afterCells = carryAfter.map((n) => reelCell(n));
+    track.append(...beforeCells, leadCell, ...afterCells);
+    // Only as many carried rows stay ahead of the winner as fit between the
+    // window's near edge and it — the outer ones were clipped at rest, so
+    // dropping them changes nothing on screen.
+    let beforeSize = 0;
+    for (const c of beforeCells) beforeSize += c[ax.size];
+    const halfWindow = (viewport - leadCell[ax.size]) / 2;
+    while (beforeCells.length && beforeSize > halfWindow) {
+      beforeSize -= beforeCells[0][ax.size];
+      beforeCells[0].remove();
+      beforeCells.shift();
+    }
+    let afterSize = 0;
+    for (const c of afterCells) afterSize += c[ax.size];
+    // Centre the existing name where it already sits; the queue starts after
+    // the carried rows, so the belt's grid begins there.
+    lead.style[ax.cssSize] = Math.max(0, halfWindow - beforeSize) + "px";
+    const base = lead[ax.size] + beforeSize + leadCell[ax.size] + afterSize;
     reelState.base = base;
+    // The head (spacer, carried rows, lead cell) is protected from later
+    // trims and excluded from the seq-cell count.
+    reelState.headCount = 2 + beforeCells.length + afterCells.length;
 
     // The strip travels exactly one sequence per cycle, so it must be at
     // least one sequence WIDER than the viewport — otherwise the tail of
@@ -320,7 +402,7 @@
     // than a single loop (short pools).
     const copies = Math.max(
       2,
-      Math.ceil((Math.max(loopW, spinDist - base) + viewportW) / loopW)
+      Math.ceil((Math.max(loopLen, spinDist - base) + viewport) / loopLen)
     );
     for (let c = 0; c < copies; c++) {
       for (const n of seq) track.appendChild(reelCell(n, "fade-in"));
@@ -332,19 +414,19 @@
     reel.classList.add("is-live");
     // Wind up from rest, then hand over to the constant-speed loop at exactly
     // cruise speed — accelerating over t covers v*t/2.
-    const cruiseMs = loopW / REEL_CRUISE_V;
+    const cruiseMs = loopLen / REEL_CRUISE_V;
     requestAnimationFrame(() => {
       // The loop runs entirely past the lead cell, where the strip repeats.
       track.style.setProperty("--loop-from", -base + "px");
-      track.style.setProperty("--loop-to", -(base + loopW) + "px");
+      track.style.setProperty("--loop-to", -(base + loopLen) + "px");
       track.style.setProperty("--cruise-dur", (cruiseMs / 1000).toFixed(3) + "s");
       track.classList.add("spinup");
       track.style.transitionDuration = REEL_SPINUP_MS + "ms";
       void track.offsetWidth;
-      track.style.transform = `translateX(${-spinDist}px)`;
+      track.style.transform = `${ax.t}(${-spinDist}px)`;
       const windupStart = performance.now();
       reelState.phase = "spinup";
-      startReelTicks(track, cellW);
+      startReelTicks(track, cellSize);
       // Hand over when the wind-up truly ends. A bare timer can fire while the
       // transition still has a frame to run, which snaps the belt forward.
       const toCruise = (e) => {
@@ -355,8 +437,8 @@
         // negative delay, so neither position nor speed jumps. transitionend
         // lands a frame after the transition actually stopped, so advance the
         // phase by that dead time or the belt loses a frame of travel.
-        const rel = spinDist >= base ? (spinDist - base) % loopW : 0;
-        const relMs = (rel / loopW) * cruiseMs;
+        const rel = spinDist >= base ? (spinDist - base) % loopLen : 0;
+        const relMs = (rel / loopLen) * cruiseMs;
         const lost = Math.max(0, performance.now() - (windupStart + REEL_SPINUP_MS));
         track.style.transitionDuration = "0ms";
         track.style.transform = "";
@@ -402,13 +484,14 @@
       refreshPartials();
       return;
     }
-    const cellW =
-      reelState.cellW || parseFloat(getComputedStyle(reel).getPropertyValue("--cell-w")) || 160;
-    const viewportW = reel.clientWidth || 300;
-    const centerOffset = (viewportW - cellW) / 2;
+    const ax = reelAxis();
+    const cellSize =
+      reelState.cellSize || parseFloat(getComputedStyle(reel).getPropertyValue(ax.cellVar)) || 160;
+    const viewport = reel[ax.vp] || 300;
+    const centerOffset = (viewport - cellSize) / 2;
     const readTraveled = () => {
       const t = getComputedStyle(track).transform;
-      return t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t).m41) : 0;
+      return t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t)[ax.mat]) : 0;
     };
 
     // Freeze exactly where the belt is *before* touching the DOM, so it can't
@@ -418,7 +501,7 @@
     track.style.transitionDuration = "0ms";
     track.classList.remove("cruising", "spinup");
     track.classList.add("landing");
-    track.style.transform = `translateX(${-traveled}px)`;
+    track.style.transform = `${ax.t}(${-traveled}px)`;
 
     // Hand over from the belt's real speed (it may still be winding up), so
     // the reveal never jumps in velocity.
@@ -429,20 +512,23 @@
     // sprinting to catch a winner parked at the end of the strip.
     const idealDist = (v0 * REEL_LAND_MS) / 2;
     // Sequence cells sit on a grid starting after the lead cell: grid j is at
-    // base + j*cellW. Everything past the right edge is invisible and can be
+    // base + j*cellSize. Everything past the far edge is invisible and can be
     // rebuilt (never drop the lead spacer or the lead cell).
     const base = reelState.base || 0;
-    const originLeft = track.offsetLeft;
+    // The head (spacer, carried rows, lead cell) is never trimmed and never
+    // counted as runway; everything past it sits on the sequence grid.
+    const headCount = reelState.headCount || 2;
+    const origin = track[ax.off];
     while (
-      track.children.length > 2 &&
-      track.lastElementChild.offsetLeft - originLeft >= traveled + viewportW
+      track.children.length > headCount &&
+      track.lastElementChild[ax.off] - origin >= traveled + viewport
     ) {
       track.lastElementChild.remove();
     }
-    const existing = Math.max(0, track.children.length - 2);
+    const existing = Math.max(0, track.children.length - headCount);
     let grid = Math.max(
       existing,
-      Math.round((traveled + centerOffset + idealDist - base) / cellW)
+      Math.round((traveled + centerOffset + idealDist - base) / cellSize)
     );
     // Never let the runway's last name duplicate the winner.
     if (seq.length > 1 && seq[((grid - 1) % seq.length + seq.length) % seq.length] === winnerName) {
@@ -453,15 +539,39 @@
     }
     track.appendChild(reelCell(winnerName, "is-winner"));
     const winnerCell = track.lastElementChild;
-    const target = winnerCell.offsetLeft - originLeft - centerOffset;
-    const dist = Math.max(cellW, target - traveled);
+    const target = winnerCell[ax.off] - origin - centerOffset;
+    const dist = Math.max(cellSize, target - traveled);
+    // The belt must not visibly end at the winner: continue the sequence past
+    // it to cover the far side of the window, so the drum reads as an endless
+    // loop rather than a strip whose last entry happened to win.
+    let resume = (grid + 1) % seq.length;
+    if (seq.length > 1 && seq[resume] === winnerName) resume = (resume + 1) % seq.length;
+    const tail = Math.ceil((viewport - centerOffset) / cellSize) + 1;
+    for (let i = 0; i < tail; i++) {
+      track.appendChild(reelCell(seq[(resume + i) % seq.length]));
+    }
+    // Remember the names flanking the winner so the resting dress can keep
+    // them: swapping the neighbouring rows for different ones right after
+    // the reveal is jarring.
+    const nb = { before: [], after: [] };
+    let pe = winnerCell.previousElementSibling;
+    while (pe && nb.before.length < 3) {
+      if (pe.classList.contains("reel-cell")) nb.before.unshift(pe.textContent);
+      pe = pe.previousElementSibling;
+    }
+    let ne = winnerCell.nextElementSibling;
+    while (ne && nb.after.length < 3) {
+      if (ne.classList.contains("reel-cell")) nb.after.push(ne.textContent);
+      ne = ne.nextElementSibling;
+    }
+    reelState.restNeighbors = nb;
     // The easing starts at 2x its average slope, so this duration makes the
     // landing begin at exactly the belt's current speed and ease to a stop.
     const dur = Math.round(Math.min(2600, Math.max(700, (2 * dist) / v0)));
 
     void track.offsetWidth;
     track.style.transitionDuration = dur + "ms";
-    track.style.transform = `translateX(${-target}px)`;
+    track.style.transform = `${ax.t}(${-target}px)`;
     reelState.phase = "landing";
     // Pop only the cell we landed on; the re-rendered winner must not re-pop.
     reelLater(() => {
@@ -472,6 +582,56 @@
       reelState.phase = "idle";
       refreshPartials();
     }, dur + 420);
+  }
+
+  /* ---------- Resting drum (vertical) ---------- */
+  // The vertical window is tall enough to show rows around the resting
+  // winner; a lone cell would end the drum the same way the landing used to.
+  // Dimmed neighbours are added symmetrically (uniform row heights keep the
+  // winner centred), taken from the spin's sequence, or fetched once.
+  let restNames = null;
+
+  async function dressVerticalReel() {
+    if (!document.body.classList.contains("reel-vertical")) return;
+    const track = $("#result .reel-track");
+    if (!track || track.children.length !== 1) return;
+    const winner = track.firstElementChild;
+    if (!winner.classList.contains("is-winner")) return;
+    // Prefer the names that flanked the winner on the landing frame so the
+    // re-render after the reveal does not swap the neighbouring rows.
+    let aboveNames;
+    let belowNames;
+    if (reelState.restNeighbors) {
+      aboveNames = reelState.restNeighbors.before.filter((n) => n !== winner.textContent);
+      belowNames = reelState.restNeighbors.after.filter((n) => n !== winner.textContent);
+    }
+    if (!aboveNames.length || !belowNames.length) {
+      let names = reelState.seq && reelState.seq.length ? reelState.seq : restNames;
+      if (!names) {
+        try {
+          const resp = await fetch("/api/entries");
+          const entries = await resp.json();
+          names = entries.map((e) => e.name);
+          restNames = names;
+        } catch {
+          return;
+        }
+        // The swap may have raced us: only dress a still-fresh, still-vertical
+        // resting track.
+        if (!track.isConnected || !document.body.classList.contains("reel-vertical")) return;
+        if (track.children.length !== 1) return;
+      }
+      const pool = names.filter((n) => n !== winner.textContent);
+      if (pool.length === 0) return;
+      aboveNames = [0, 1, 2].map((i) => pool[i % pool.length]);
+      belowNames = [0, 1, 2].map((i) => pool[(i + 1) % pool.length]);
+    }
+    const cell = (name) => {
+      const c = reelCell(name);
+      c.setAttribute("aria-hidden", "true");
+      return c;
+    };
+    winner.replaceWith(...aboveNames.map(cell), winner, ...belowNames.map(cell));
   }
 
   /* ---------- Confetti ---------- */
@@ -610,8 +770,9 @@
 
   // One tick per cell boundary crossing. Driven by the reel's real position,
   // so the clicks thin out on their own as the belt decelerates.
-  function startReelTicks(track, cellW) {
+  function startReelTicks(track, cellSize) {
     if (reelState.tickRAF) cancelAnimationFrame(reelState.tickRAF);
+    const ax = reelAxis();
     let lastCell = null;
     let lastAt = 0;
     let prevPos = null;
@@ -626,7 +787,7 @@
         return;
       }
       const t = getComputedStyle(track).transform;
-      const pos = t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t).m41) : 0;
+      const pos = t && t !== "none" ? Math.max(0, -new DOMMatrixReadOnly(t)[ax.mat]) : 0;
       const now = performance.now();
       // Track live speed so the landing can hand over from whatever the belt
       // is actually doing, not from an assumed cruise speed.
@@ -637,7 +798,7 @@
       }
       prevPos = pos;
       prevT = now;
-      const cell = Math.floor(pos / cellW);
+      const cell = Math.floor(pos / cellSize);
       if (lastCell === null) {
         lastCell = cell;
       } else if (cell !== lastCell && now - lastAt > 12) {
@@ -722,6 +883,37 @@
       syncSoundBtn();
       // The click is a user gesture: unlock audio and preview the tick.
       if (next) playTick(0.8);
+    });
+  }
+
+  /* ---------- Reel orientation ---------- */
+  function syncReelToggle() {
+    const btn = $("#reel-toggle");
+    if (!btn) return;
+    const vertical = document.body.classList.contains("reel-vertical");
+    btn.title = vertical
+      ? "Spinner: vertical — click for horizontal"
+      : "Spinner: horizontal — click for vertical";
+    btn.setAttribute("aria-pressed", vertical ? "true" : "false");
+  }
+
+  function bindReelToggle() {
+    document.body.classList.toggle("reel-vertical", localStorage.getItem("raffle-reel-mode") === "v");
+    syncReelToggle();
+    $("#reel-toggle")?.addEventListener("click", () => {
+      // Mid-spin the belt's geometry is fixed on one axis; switching now
+      // would hand the landing the wrong measurements.
+      if (reelState.phase !== "idle") {
+        toast("Wait for the draw to finish.");
+        return;
+      }
+      const next = !document.body.classList.contains("reel-vertical");
+      document.body.classList.toggle("reel-vertical", next);
+      localStorage.setItem("raffle-reel-mode", next ? "v" : "h");
+      syncReelToggle();
+      // The resting track was dressed for the old orientation (or left bare
+      // for the new one); re-render it so the drum matches.
+      swapPartial("/partials/result", "#result");
     });
   }
 
@@ -1252,6 +1444,8 @@
     bindHistoryToggle();
     bindEntriesToggle();
     bindSoundToggle();
+    bindReelToggle();
+    dressVerticalReel();
     bindListName();
     loadListName();
     // #new-name lives inside the swapped table partial, so its Enter
