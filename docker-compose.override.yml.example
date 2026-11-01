@@ -16,3 +16,9 @@ services:
     # Tagged separately from the GHCR image so a local build can't shadow the
     # published tag (and `docker compose pull` can't clobber your local build).
     image: goraffle:local
+
+  postgres:
+    # The e2e script and `go test` expect Postgres at localhost:5432. Bound to
+    # loopback so it is not reachable from the rest of the network.
+    ports:
+      - "127.0.0.1:5432:5432"

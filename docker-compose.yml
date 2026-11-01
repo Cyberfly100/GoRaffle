@@ -22,8 +22,8 @@ services:
       # so DB files live where your NAS snapshots/backups cover them.
       # Unset = plain Docker volume.
       - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql
-    ports:
-      - "5432:5432"
+    # No published port: the app reaches Postgres over the compose network.
+    # Local dev publishes it on localhost via docker-compose.override.yml.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d raffle"]
       interval: 3s
