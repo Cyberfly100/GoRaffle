@@ -20,10 +20,12 @@ type Server struct {
 	tmpl     *template.Template
 	staticFS fs.FS
 	upgrader websocket.Upgrader
+
+	lastReveal lastReveal
 }
 
 func NewServer(store *db.Store, engine *raffle.Engine, hub *ws.Hub, tmpl *template.Template, staticFS fs.FS) *Server {
-	return &Server{
+	s := &Server{
 		store:    store,
 		engine:   engine,
 		hub:      hub,
@@ -33,6 +35,8 @@ func NewServer(store *db.Store, engine *raffle.Engine, hub *ws.Hub, tmpl *templa
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
+	s.lastReveal.window = defaultRevealReplayWindow
+	return s
 }
 
 // Routes returns the full HTTP mux for the application.

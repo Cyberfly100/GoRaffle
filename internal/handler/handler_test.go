@@ -35,6 +35,12 @@ var ctx = context.Background()
 // A differently-named TEST_DATABASE_URL fails fast instead of colliding.
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newTestServerWith(t, nil)
+}
+
+// newTestServerWith is newTestServer with a hook to configure the Server.
+func newTestServerWith(t *testing.T, configure func(*handler.Server)) *httptest.Server {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		dsn = "postgresql://user:pass@localhost:5432/raffle_handler_test?sslmode=disable"
@@ -101,6 +107,9 @@ func newTestServer(t *testing.T) *httptest.Server {
 	hub := ws.NewHub()
 	go hub.Run()
 	srv := handler.NewServer(store, raffle.NewEngine(store), hub, tmpl, web.FS)
+	if configure != nil {
+		configure(srv)
+	}
 	ts := httptest.NewServer(srv.Routes())
 	t.Cleanup(ts.Close)
 	return ts
@@ -356,58 +365,193 @@ func TestWebSocketBroadcast(t *testing.T) {
 	t.Error("no entries event received over websocket")
 }
 
-// Suspense: after a draw, browsers receive a "suspense" event whose names
-// array drives the flicker animation.
-func TestSuspenseNames(t *testing.T) {
-	ts := newTestServer(t)
+// revealEvent is the one websocket event a Draw sends.
+type revealEvent struct {
+	Type string `json:"type"`
+	Data struct {
+		Winner struct {
+			ID        int      `json:"id"`
+			Name      string   `json:"name"`
+			PickCount int      `json:"pick_count"`
+			Tags      []string `json:"tags"`
+		} `json:"winner"`
+		PickID        int      `json:"pick_id"`
+		PickNumber    int      `json:"pick_number"`
+		MustHave      []string `json:"must_have"`
+		EligiblePool  int      `json:"eligible_pool"`
+		SuspenseNames []string `json:"suspense_names"`
+	} `json:"data"`
+}
 
-	// Add two tagged entries so the filtered pool has names.
-	alice := postJSON(t, ts, "/api/entries", `{"name":"Alice"}`)
-	var cA struct {
-		ID int `json:"id"`
-	}
-	if err := json.Unmarshal(alice, &cA); err != nil {
-		t.Fatalf("add response: %v", err)
-	}
-	postJSON(t, ts, "/api/entries", `{"name":"Bob"}`)
-	postJSON(t, ts, "/api/entries/"+itoa(cA.ID)+"/tags", `{"name":"VIP"}`)
-
+func dialWS(t *testing.T, ts *httptest.Server) *websocket.Conn {
+	t.Helper()
 	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", nil)
 	if err != nil {
 		t.Fatalf("dial ws: %v", err)
 	}
-	defer conn.Close()
+	t.Cleanup(func() { conn.Close() })
+	return conn
+}
 
+// readEvents collects every websocket message that arrives within d.
+func readEvents(t *testing.T, conn *websocket.Conn, d time.Duration) [][]byte {
+	t.Helper()
+	var msgs [][]byte
+	_ = conn.SetReadDeadline(time.Now().Add(d))
+	for {
+		_, msg, err := conn.ReadMessage()
+		if err != nil {
+			return msgs
+		}
+		msgs = append(msgs, msg)
+	}
+}
+
+// seedVIP adds Alice (with the VIP Tag) and Bob, returning Alice's id.
+func seedVIP(t *testing.T, ts *httptest.Server) int {
+	t.Helper()
+	alice := postJSON(t, ts, "/api/entries", `{"name":"Alice"}`)
+	var a struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(alice, &a); err != nil {
+		t.Fatalf("add response: %v", err)
+	}
+	postJSON(t, ts, "/api/entries", `{"name":"Bob"}`)
+	postJSON(t, ts, "/api/entries/"+itoa(a.ID)+"/tags", `{"name":"VIP"}`)
+	return a.ID
+}
+
+// A Draw sends exactly one Reveal event, at once, carrying the winner, the
+// Pick, the Eligible pool and Suspense names from the Pot. Its content is the
+// HTTP Draw response.
+func TestDrawSendsOneReveal(t *testing.T) {
+	ts := newTestServer(t)
+	aliceID := seedVIP(t, ts)
+	conn := dialWS(t, ts)
 	// Let the hub register the client before broadcasting.
 	time.Sleep(100 * time.Millisecond)
-	postJSON(t, ts, "/api/draw", `{"must_have":["VIP"],"any_of":[]}`)
 
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	_, msg, err := conn.ReadMessage()
+	sent := time.Now()
+	body := postJSON(t, ts, "/api/draw", `{"must_have":["VIP"],"any_of":[]}`)
+
+	_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	_, first, err := conn.ReadMessage()
 	if err != nil {
-		t.Fatalf("read ws: %v", err)
+		t.Fatalf("no event within 500ms of the Draw: %v", err)
 	}
-	var evt struct {
-		Type string `json:"type"`
-		Data struct {
-			Names []string `json:"names"`
-		} `json:"data"`
+	if lag := time.Since(sent); lag > 500*time.Millisecond {
+		t.Errorf("Reveal arrived %v after the Draw, want immediately", lag)
 	}
-	if err := json.Unmarshal(msg, &evt); err != nil {
-		t.Fatalf("suspense JSON: %v (%s)", err, msg)
+	var evt revealEvent
+	if err := json.Unmarshal(first, &evt); err != nil {
+		t.Fatalf("event JSON: %v (%s)", err, first)
 	}
-	if evt.Type != "suspense" {
-		t.Fatalf("first event = %q, want suspense (%s)", evt.Type, msg)
+	if evt.Type != "reveal" {
+		t.Fatalf("event = %q, want reveal (%s)", evt.Type, first)
 	}
-	if evt.Type == "suspense" && len(evt.Data.Names) == 0 {
-		t.Error("suspense event carried empty names array")
+	d := evt.Data
+	if d.Winner.ID != aliceID || d.Winner.Name != "Alice" || d.Winner.PickCount != 1 {
+		t.Errorf("winner = %+v, want Alice with 1 Pick", d.Winner)
+	}
+	if len(d.Winner.Tags) != 1 || d.Winner.Tags[0] != "VIP" {
+		t.Errorf("winner Tags = %+v, want [VIP]", d.Winner.Tags)
+	}
+	if d.PickNumber != 1 || d.PickID == 0 {
+		t.Errorf("pick_number = %d, pick_id = %d; want 1 and an id", d.PickNumber, d.PickID)
+	}
+	if d.EligiblePool != 1 {
+		t.Errorf("eligible_pool = %d, want 1", d.EligiblePool)
+	}
+	if len(d.MustHave) != 1 || d.MustHave[0] != "VIP" {
+		t.Errorf("must_have = %v, want [VIP]", d.MustHave)
+	}
+	if len(d.SuspenseNames) == 0 {
+		t.Error("Reveal carried no Suspense names")
 	}
 	// Only Alice has the VIP Tag, so every name on the Reel is Alice.
-	for _, n := range evt.Data.Names {
+	for _, n := range d.SuspenseNames {
 		if n != "Alice" {
-			t.Errorf("suspense name %q is outside the filtered Eligible pool (Alice only)", n)
+			t.Errorf("Suspense name %q is outside the Pot (Alice only)", n)
 		}
 	}
+
+	var fromHTTP map[string]any
+	if err := json.Unmarshal(body, &fromHTTP); err != nil {
+		t.Fatalf("draw response JSON: %v (%s)", err, body)
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(first, &env); err != nil {
+		t.Fatalf("event JSON: %v", err)
+	}
+	if a, b := mustJSON(t, fromHTTP), mustJSON(t, env.Data); a != b {
+		t.Errorf("HTTP Draw response differs from the Reveal event:\n http: %s\n   ws: %s", a, b)
+	}
+
+	// No separate winner event follows.
+	if more := readEvents(t, conn, 2500*time.Millisecond); len(more) != 0 {
+		t.Errorf("events after the Reveal: %s", more)
+	}
+}
+
+// A browser that connects shortly after a Draw is sent that Reveal alone;
+// one that connects after the replay window gets nothing.
+func TestRevealReplayOnConnect(t *testing.T) {
+	const window = 600 * time.Millisecond
+	ts := newTestServerWith(t, func(s *handler.Server) { s.SetRevealReplayWindow(window) })
+	seedVIP(t, ts)
+	body := postJSON(t, ts, "/api/draw", `{}`)
+	var drawn struct {
+		PickID int `json:"pick_id"`
+	}
+	if err := json.Unmarshal(body, &drawn); err != nil {
+		t.Fatalf("draw response: %v", err)
+	}
+
+	early := readEvents(t, dialWS(t, ts), 300*time.Millisecond)
+	if len(early) != 1 {
+		t.Fatalf("connecting within the window got %d events, want the one Reveal: %s", len(early), early)
+	}
+	var evt revealEvent
+	if err := json.Unmarshal(early[0], &evt); err != nil {
+		t.Fatalf("event JSON: %v", err)
+	}
+	if evt.Type != "reveal" || evt.Data.PickID != drawn.PickID {
+		t.Errorf("replayed %s, want the Reveal of Pick %d", early[0], drawn.PickID)
+	}
+
+	time.Sleep(window)
+	if late := readEvents(t, dialWS(t, ts), 300*time.Millisecond); len(late) != 0 {
+		t.Errorf("connecting after the window got %s, want nothing", late)
+	}
+}
+
+// After an Undo or a Reset the last Reveal's Pick is gone, so nothing replays.
+func TestNoRevealReplayAfterUndoOrReset(t *testing.T) {
+	for _, path := range []string{"/api/undo", "/api/reset"} {
+		t.Run(path, func(t *testing.T) {
+			ts := newTestServer(t)
+			seedVIP(t, ts)
+			postJSON(t, ts, "/api/draw", `{}`)
+			postJSON(t, ts, path, "")
+			for _, msg := range readEvents(t, dialWS(t, ts), 300*time.Millisecond) {
+				if strings.Contains(string(msg), `"type":"reveal"`) {
+					t.Errorf("replayed a Reveal after %s: %s", path, msg)
+				}
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
 }
 
 func TestHistoryExportCSV(t *testing.T) {

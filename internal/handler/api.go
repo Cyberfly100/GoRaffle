@@ -106,6 +106,7 @@ func (s *Server) clearEntries(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "clear entries")
 		return
 	}
+	s.lastReveal.forget()
 	s.broadcast(EventEntries, map[string]bool{"cleared": true})
 	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
 }

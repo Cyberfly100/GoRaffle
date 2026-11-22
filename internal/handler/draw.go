@@ -4,15 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/goraffle/raffle/internal/db"
 	"github.com/goraffle/raffle/internal/model"
 	"github.com/goraffle/raffle/internal/raffle"
 )
-
-// suspenseTotal is how long the Suspense runs before the winner is revealed.
-const suspenseTotal = 2000 * time.Millisecond
 
 func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 	var req model.DrawRequest
@@ -36,35 +32,23 @@ func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every connected browser plays the same Reveal, starting the moment the
+	// event arrives; the Reel owns the pacing, so the server holds no timing.
+	// The drawing browser gets the same Reveal in the response, so it can
+	// play it without a websocket.
+	s.broadcastReveal(reveal)
 	writeJSON(w, http.StatusOK, reveal)
-
-	// Every connected browser shares the same Reveal. The broadcast runs in
-	// the background so the HTTP response returns immediately.
-	go s.broadcastReveal(reveal)
 }
 
-// broadcastReveal pushes the Suspense (names from the Pot) followed, after
-// the Suspense duration, by the winner.
+// broadcastReveal sends the one Reveal event to every browser.
 func (s *Server) broadcastReveal(reveal *raffle.Reveal) {
-	if msg, err := marshalEvent(EventSuspense, map[string]any{
-		"names":     reveal.SuspenseNames,
-		"pool":      reveal.EligiblePool,
-		"must_have": reveal.MustHave,
-		"any_of":    reveal.AnyOf,
-	}); err == nil {
-		s.hub.Broadcast(msg)
-	} else {
-		slogErrorLogger(err, "marshal suspense event")
+	msg, err := marshalEvent(EventReveal, reveal)
+	if err != nil {
+		slogErrorLogger(err, "marshal reveal event")
+		return
 	}
-
-	// Give the client time to run the animation, then resolve.
-	time.Sleep(suspenseTotal)
-
-	if msg, err := marshalEvent(EventWinner, reveal); err == nil {
-		s.hub.Broadcast(msg)
-	} else {
-		slogErrorLogger(err, "marshal winner event")
-	}
+	s.lastReveal.remember(msg)
+	s.hub.Broadcast(msg)
 }
 
 func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +65,7 @@ func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "undo")
 		return
 	}
+	s.lastReveal.forget()
 
 	info := "Removed last entry: " + last.EntryName
 	if msg, err := marshalEvent(EventUndo, map[string]any{
@@ -99,6 +84,7 @@ func (s *Server) resetScores(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "reset scores")
 		return
 	}
+	s.lastReveal.forget()
 	if msg, err := marshalEvent(EventEntries, map[string]bool{"reset": true}); err == nil {
 		s.hub.Broadcast(msg)
 	}

@@ -17,8 +17,8 @@ var ErrNoEligible = errors.New("no eligible entries")
 const SuspenseNameCount = 30
 
 // Reveal is the one result of a Draw: everything every browser is shown for it.
-// Its JSON encoding is the HTTP draw response and the winner event; the
-// Suspense names are not part of it and travel only in the suspense event.
+// Its JSON encoding is both the HTTP Draw response and the websocket reveal
+// event, so every browser plays the same Reveal from either.
 type Reveal struct {
 	Winner        model.Entry `json:"winner"`
 	PickID        int         `json:"pick_id"`
@@ -26,7 +26,7 @@ type Reveal struct {
 	MustHave      []string    `json:"must_have,omitempty"`
 	AnyOf         []string    `json:"any_of,omitempty"`
 	EligiblePool  int         `json:"eligible_pool"`
-	SuspenseNames []string    `json:"-"`
+	SuspenseNames []string    `json:"suspense_names"`
 }
 
 // Engine performs Draws against a Store. It is safe for concurrent use.

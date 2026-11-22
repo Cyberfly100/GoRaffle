@@ -27,10 +27,9 @@ type Event struct {
 }
 
 const (
-	EventSuspense = "suspense"
-	EventWinner   = "winner"
-	EventUndo     = "undo"
-	EventEntries  = "entries"
+	EventReveal  = "reveal"
+	EventUndo    = "undo"
+	EventEntries = "entries"
 )
 
 // marshalEvent JSON-encodes an Event for WS broadcast.
