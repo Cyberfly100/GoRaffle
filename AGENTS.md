@@ -19,3 +19,17 @@ require a rebuild — including the docker image — to be visible).
   tests a deployed instance (e.g. the compose app on 8543).
 - It resets/reseeds DB state and restores the list name it found; don't run it
   against a database whose contents you care about.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues for Cyberfly100/GoRaffle (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root (created lazily). See `docs/agents/domain.md`.
