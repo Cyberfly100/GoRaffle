@@ -4,14 +4,22 @@
     <div class="filter-zone">
       <span class="zone-label">Must have <span class="zone-op">[AND]</span></span>
       <div class="zone-body">
-        <div class="zone-chips" data-zone="must_have"></div>
+        <div class="zone-chips" data-zone="must_have">
+          {{range .MustHave}}
+          <span class="tag-bubble {{tagClass .}}" data-tag="{{.}}">{{.}}<button class="tag-x" data-action="remove-filter-tag" data-zone="must_have" data-tag="{{.}}" title="Remove tag">×</button></span>
+          {{end}}
+        </div>
         <button class="tag-add" data-action="open-filter-picker" data-zone="must_have" title="Add tag" aria-label="Add tag filter"></button>
       </div>
     </div>
     <div class="filter-zone">
       <span class="zone-label">Any of <span class="zone-op">[OR]</span></span>
       <div class="zone-body">
-        <div class="zone-chips" data-zone="any_of"></div>
+        <div class="zone-chips" data-zone="any_of">
+          {{range .AnyOf}}
+          <span class="tag-bubble {{tagClass .}}" data-tag="{{.}}">{{.}}<button class="tag-x" data-action="remove-filter-tag" data-zone="any_of" data-tag="{{.}}" title="Remove tag">×</button></span>
+          {{end}}
+        </div>
         <button class="tag-add" data-action="open-filter-picker" data-zone="any_of" title="Add tag" aria-label="Add tag filter"></button>
       </div>
     </div>

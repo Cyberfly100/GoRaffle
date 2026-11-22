@@ -291,7 +291,32 @@ async function secondBrowser(browser, testInfo) {
   return page;
 }
 
+// Adds a Tag to the Tag filter the way the host does: open the filter, press
+// the zone's "+" ("must_have" or "any_of") and pick the Tag.
+async function chooseFilterTag(page, zone, tag) {
+  const accordion = page.locator("#filter-accordion");
+  if (!(await accordion.evaluate((d) => d.open))) await accordion.locator("summary").click();
+  await page.locator(`#filter-bar .tag-add[data-zone="${zone}"]`).click();
+  await page.locator(`#filter-picker [data-action="pick-filter-tag"][data-tag="${tag}"]`).click();
+  await expect(page.locator(`#filter-bar [data-zone="${zone}"] .tag-bubble[data-tag="${tag}"]`)).toBeVisible();
+}
+
+// What the table shows for the next Draw: the names highlighted as in the
+// Eligible pool and the names marked as in the Pot, each sorted.
+async function tableMarking(page) {
+  return page.locator("#entry-table [data-id]").evaluateAll((rows) => {
+    const name = (r) => r.querySelector('textarea[data-field="name"]').value;
+    const names = (keep) => rows.filter(keep).map(name).sort();
+    return {
+      eligible: names((r) => !r.classList.contains("row-ineligible")),
+      pot: names((r) => r.classList.contains("row-pot")),
+    };
+  });
+}
+
 module.exports = {
+  chooseFilterTag,
+  tableMarking,
   waitForLiveUpdates,
   otherBrowserChangesEntry,
   nameField,

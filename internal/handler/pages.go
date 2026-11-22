@@ -12,11 +12,12 @@ import (
 
 	"github.com/goraffle/raffle/internal/db"
 	"github.com/goraffle/raffle/internal/model"
+	"github.com/goraffle/raffle/internal/raffle"
 )
 
 // pageData is what the index page and its partials render.
 type pageData struct {
-	Entries  []model.Entry
+	Entries  []raffle.MarkedEntry
 	Tags     []model.Tag
 	History  []model.Pick
 	LastPick *model.Pick
@@ -89,9 +90,10 @@ func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) partialTable(w http.ResponseWriter, r *http.Request) {
-	cs, err := s.store.ListEntries(r.Context())
+	q := r.URL.Query()
+	cs, err := s.engine.MarkEntries(r.Context(), q["must_have"], q["any_of"])
 	if err != nil {
-		slogError(w, err, "list entries")
+		slogError(w, err, "mark entries")
 		return
 	}
 	renderNamed(w, s, "partial:entry_table", pageData{Entries: cs})
@@ -161,7 +163,7 @@ func (s *Server) partialTagPopover(w http.ResponseWriter, r *http.Request) {
 			available = append(available, t)
 		}
 	}
-	renderNamed(w, s, "partial:tag_popover", pageData{Entries: []model.Entry{{ID: id}}, Tags: available})
+	renderNamed(w, s, "partial:tag_popover", pageData{Tags: available})
 }
 
 func renderNamed(w http.ResponseWriter, s *Server, name string, data any) {
@@ -172,7 +174,8 @@ func renderNamed(w http.ResponseWriter, s *Server, name string, data any) {
 }
 
 func (s *Server) buildPageData(ctx context.Context) (pageData, error) {
-	cs, err := s.store.ListEntries(ctx)
+	// The page always starts with an empty Tag filter.
+	cs, err := s.engine.MarkEntries(ctx, nil, nil)
 	if err != nil {
 		return pageData{}, err
 	}

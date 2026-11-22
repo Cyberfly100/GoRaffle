@@ -10,7 +10,7 @@
     </div>
     <div id="entry-table-body" class="rows-scroll">
       {{range $c := .Entries}}
-      <div class="row" data-id="{{$c.ID}}">
+      <div class="row{{if not $c.Eligible}} row-ineligible{{end}}{{if $c.InPot}} row-pot{{end}}" data-id="{{$c.ID}}"{{if not $c.Eligible}} title="Not eligible for the next draw"{{else if $c.InPot}} title="In the Pot: can win the next draw"{{end}}>
         <textarea class="cell name" name="name" rows="1" data-field="name" title="Click to rename">{{$c.Name}}</textarea>
         <input class="cell count" name="pick_count" type="number" min="0" value="{{$c.PickCount}}" data-field="pick_count" title="Click to edit">
         <label class="cell excl">
