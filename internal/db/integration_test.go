@@ -205,3 +205,119 @@ func TestUndo(t *testing.T) {
 		t.Errorf("pick_count after undo = %d, want 0", c.PickCount)
 	}
 }
+
+// addEntries adds named Entries and returns their ids by name.
+func addEntries(t *testing.T, store *db.Store, names ...string) map[string]int {
+	t.Helper()
+	ids := map[string]int{}
+	for _, n := range names {
+		e, err := store.AddEntry(context.Background(), nil, n)
+		if err != nil {
+			t.Fatalf("add %s: %v", n, err)
+		}
+		ids[n] = e.ID
+	}
+	return ids
+}
+
+// setPickCount sets an Entry's Pick count directly (as a manual edit would).
+func setPickCount(t *testing.T, store *db.Store, id, count int) {
+	t.Helper()
+	e, err := store.GetEntry(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.PickCount = count
+	if err := store.UpdateEntry(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Suspense names are sampled only from the Pot: Excluded, filtered-out and
+// already-picked-this-Season Entries never appear on the Reel.
+func TestSuspenseNamesComeFromPot(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	ids := addEntries(t, store, "ann", "ben", "cat", "dan", "eve", "out")
+	for _, n := range []string{"ann", "ben", "cat", "dan", "eve"} {
+		if err := store.SetEntryTags(ctx, nil, ids[n], []string{"in"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	eve, _ := store.GetEntry(ctx, ids["eve"])
+	eve.Excluded = true
+	if err := store.UpdateEntry(ctx, eve); err != nil {
+		t.Fatal(err)
+	}
+	// ann and ben are one Pick ahead: the Pot is {cat, dan}.
+	setPickCount(t, store, ids["ann"], 1)
+	setPickCount(t, store, ids["ben"], 1)
+
+	res, err := engine.Draw(ctx, []string{"in"}, nil)
+	if err != nil {
+		t.Fatalf("draw: %v", err)
+	}
+	if len(res.SuspenseNames) == 0 {
+		t.Fatal("no suspense names")
+	}
+	for _, n := range res.SuspenseNames {
+		if n != "cat" && n != "dan" {
+			t.Errorf("suspense name %q is not in the Pot {cat, dan}", n)
+		}
+	}
+	if res.Winner.Name != "cat" && res.Winner.Name != "dan" {
+		t.Errorf("winner %q is not in the Pot", res.Winner.Name)
+	}
+}
+
+// With one Entry left in the Pot, the Reel repeats that name and it wins.
+func TestLastStraggler(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	ids := addEntries(t, store, "ann", "ben", "cat")
+	setPickCount(t, store, ids["ann"], 1)
+	setPickCount(t, store, ids["ben"], 1)
+
+	res, err := engine.Draw(ctx, nil, nil)
+	if err != nil {
+		t.Fatalf("draw: %v", err)
+	}
+	if res.Winner.Name != "cat" {
+		t.Errorf("winner = %q, want the last straggler cat", res.Winner.Name)
+	}
+	if len(res.SuspenseNames) == 0 {
+		t.Fatal("no suspense names")
+	}
+	for _, n := range res.SuspenseNames {
+		if n != "cat" {
+			t.Errorf("suspense name %q, want only cat", n)
+		}
+	}
+}
+
+// The Reveal's Eligible pool size counts the whole Eligible pool under the
+// tag filter, not just the Pot.
+func TestRevealEligiblePoolSize(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	ids := addEntries(t, store, "ann", "ben", "cat", "dan", "eve")
+	for _, n := range []string{"ann", "ben", "cat", "dan"} {
+		if err := store.SetEntryTags(ctx, nil, ids[n], []string{"in"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dan, _ := store.GetEntry(ctx, ids["dan"])
+	dan.Excluded = true
+	if err := store.UpdateEntry(ctx, dan); err != nil {
+		t.Fatal(err)
+	}
+	setPickCount(t, store, ids["ann"], 1)
+
+	res, err := engine.Draw(ctx, []string{"in"}, nil)
+	if err != nil {
+		t.Fatalf("draw: %v", err)
+	}
+	if res.EligiblePool != 3 {
+		t.Errorf("eligible pool = %d, want 3 (ann, ben, cat)", res.EligiblePool)
+	}
+}

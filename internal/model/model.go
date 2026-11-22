@@ -36,15 +36,6 @@ type DrawRequest struct {
 	AnyOf    []string `json:"any_of"`
 }
 
-type DrawResult struct {
-	Winner       Entry    `json:"winner"`
-	PickID       int      `json:"pick_id"`
-	PickNumber   int      `json:"pick_number"`
-	MustHave     []string `json:"must_have,omitempty"`
-	AnyOf        []string `json:"any_of,omitempty"`
-	EligiblePool int      `json:"eligible_pool"`
-}
-
 // EntryImport carries optional full state for import (nil = leave as-is).
 type EntryImport struct {
 	Name      string

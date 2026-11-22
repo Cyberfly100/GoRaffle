@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/lib/pq"
@@ -138,10 +137,14 @@ func (s *Store) AddEntry(ctx context.Context, tx *sql.Tx, name string) (model.En
 
 // GetEntry returns a single entry by id with tags.
 func (s *Store) GetEntry(ctx context.Context, id int) (model.Entry, error) {
+	return getEntry(ctx, s.DB, id)
+}
+
+func getEntry(ctx context.Context, q querier, id int) (model.Entry, error) {
 	var c model.Entry
 	var tags []string
 	var tagIDs64 []int64
-	err := s.DB.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		SELECT c.id, c.name, c.pick_count, c.excluded,
 		       COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}'::text[]),
 		       COALESCE(array_agg(t.id ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '{}'::int[])
@@ -234,121 +237,6 @@ const eligibleWhere = `
       WHERE ct.entry_id = c.id AND t.name = ANY($2::text[])
     )
   )`
-
-// EligiblePool returns the ids of non-excluded entries that pass the tag filter
-// (mustHave = ALL required, anyOf = at least one; empty both = no filter).
-func (s *Store) EligiblePool(ctx context.Context, mustHave, anyOf []string) ([]int, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT c.id
-		FROM entries c
-		WHERE c.excluded = FALSE`+eligibleWhere, toNullArray(mustHave), toNullArray(anyOf))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
-// EligibleEntries returns the full entries that pass the tag filter and
-// are not excluded (used for the suspense animation pool).
-func (s *Store) EligibleEntries(ctx context.Context, mustHave, anyOf []string) ([]model.Entry, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT c.id, c.name, c.pick_count, c.excluded
-		FROM entries c
-		WHERE c.excluded = FALSE`+eligibleWhere+`
-		ORDER BY c.name`, toNullArray(mustHave), toNullArray(anyOf))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []model.Entry
-	for rows.Next() {
-		var c model.Entry
-		if err := rows.Scan(&c.ID, &c.Name, &c.PickCount, &c.Excluded); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	if out == nil {
-		out = []model.Entry{}
-	}
-	return out, rows.Err()
-}
-
-// DrawLeaderboard returns ids + pick_count for a set of ids ordered by count ascending,
-// so the engine can pick among the minimum-count ties.
-func (s *Store) DrawLeaderboard(ctx context.Context, ids []int) (map[int]int, error) {
-	if len(ids) == 0 {
-		return map[int]int{}, nil
-	}
-	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id
-	}
-	query := fmt.Sprintf(`SELECT id, pick_count FROM entries WHERE id IN (%s)`,
-		strings.Join(placeholders, ","))
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make(map[int]int, len(ids))
-	for rows.Next() {
-		var id, count int
-		if err := rows.Scan(&id, &count); err != nil {
-			return nil, err
-		}
-		out[id] = count
-	}
-	return out, rows.Err()
-}
-
-// RecordPick inserts a pick and increments the winner's count atomically.
-// The pick number is derived inside the transaction as MAX(pick_number)+1.
-// Returns the new count, the assigned pick number, and the pick id.
-func (s *Store) RecordPick(ctx context.Context, tx *sql.Tx, entryID int) (int, int, int, error) {
-	q := querier(s.DB)
-	if tx != nil {
-		q = tx
-	}
-
-	if _, err := q.ExecContext(ctx,
-		`SELECT 1 FROM entries WHERE id = $1 FOR UPDATE`, entryID); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var next int
-	if err := q.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(pick_number), 0) + 1 FROM picks`).Scan(&next); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var pickID int
-	if err := q.QueryRowContext(ctx,
-		`INSERT INTO picks (entry_id, pick_number) VALUES ($1, $2)
-		 RETURNING id`, entryID, next).Scan(&pickID); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var count int
-	err := q.QueryRowContext(ctx,
-		`UPDATE entries SET pick_count = pick_count + 1, updated_at = NOW()
-		 WHERE id = $1 RETURNING pick_count`, entryID).Scan(&count)
-	return count, next, pickID, err
-}
 
 // LastPick returns the most recent pick with the winner name, or ErrNotFound.
 func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
