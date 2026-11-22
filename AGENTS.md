@@ -10,6 +10,7 @@ require a rebuild — including the docker image — to be visible).
 - Test: `go test ./...`
 - Lint: `go vet ./... && gofmt -l .` (must report nothing; fix with `gofmt -w`)
 - JS syntax check: `node --check static/js/app.js static/js/ws.js`
+- JS unit tests (pure modules, no dependencies): `node --test 'js-tests/*.test.js'`
 - E2E smoke test: `bash scripts/e2e.sh`
 - Browser tests: `npm install && npx playwright install chromium` once, then `npx playwright test`
   (one file: `npx playwright test browser-tests/import.spec.js`; one test: `-g "<title>"`)
