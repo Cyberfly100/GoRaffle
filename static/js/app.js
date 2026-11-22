@@ -1234,7 +1234,7 @@
       }
     }
     const fileInput = $("#import-file");
-    if (input) input.value = "";
+    if (fileInput) fileInput.value = "";
     const nameEl = $("#file-chosen");
     if (nameEl) nameEl.textContent = "No file chosen";
     const btn = $("#import-btn");
