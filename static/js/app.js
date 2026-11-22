@@ -599,8 +599,10 @@
     if (!winner.classList.contains("is-winner")) return;
     // Prefer the names that flanked the winner on the landing frame so the
     // re-render after the reveal does not swap the neighbouring rows.
-    let aboveNames;
-    let belowNames;
+    // After a page load there was no landing to remember, so fall back to
+    // the List order.
+    let aboveNames = [];
+    let belowNames = [];
     if (reelState.restNeighbors) {
       aboveNames = reelState.restNeighbors.before.filter((n) => n !== winner.textContent);
       belowNames = reelState.restNeighbors.after.filter((n) => n !== winner.textContent);

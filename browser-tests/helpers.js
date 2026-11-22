@@ -74,6 +74,18 @@ async function renameList(page, name) {
   await saved;
 }
 
+// The resting Reel as the host sees it: the winner's name and the visible
+// cells above/before and below/after it. `winner` is null when no cell won.
+async function restingReel(page) {
+  return page.locator("#result .reel-track .reel-cell").evaluateAll((cells) => {
+    const shown = cells.filter((c) => c.checkVisibility());
+    const i = shown.findIndex((c) => c.classList.contains("is-winner"));
+    const names = shown.map((c) => c.textContent.trim());
+    if (i < 0) return { winner: null, above: [], below: [] };
+    return { winner: names[i], above: names.slice(0, i), below: names.slice(i + 1) };
+  });
+}
+
 // Keeps the page from ever getting a live websocket.
 async function blockWebSocket(page) {
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close());
@@ -92,5 +104,6 @@ module.exports = {
   entryNamesInTable,
   exportLinkNames,
   renameList,
+  restingReel,
   blockWebSocket,
 };
