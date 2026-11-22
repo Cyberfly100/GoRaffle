@@ -300,11 +300,6 @@ input {
   opacity: 0;
 }
 
-.grid-no-anim .col-side,
-.grid-no-anim .col-side > * {
-  transition: none !important;
-}
-
 /* ===== Entries show/hide =====
    The entries card collapses vertically: animating grid-template-rows from
    1fr to 0fr slides it shut at any content height (the card must not enforce
@@ -330,8 +325,14 @@ input {
   pointer-events: none;
 }
 
-.grid-no-anim .entries-collapse {
-  transition: none !important;
+/* ===== Collapsible toggles =====
+   A toggle carries both labels; the section's state on <html> picks one, so
+   the label is right from the first paint and across every region swap. */
+.no-history [data-collapsible-toggle="history"] .when-expanded,
+:root:not(.no-history) [data-collapsible-toggle="history"] .when-collapsed,
+.no-entries [data-collapsible-toggle="entries"] .when-expanded,
+:root:not(.no-entries) [data-collapsible-toggle="entries"] .when-collapsed {
+  display: none;
 }
 
 @media (max-width: 760px) {

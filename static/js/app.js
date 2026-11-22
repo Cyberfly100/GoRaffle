@@ -2,6 +2,8 @@
 // glue between the websocket, the Draw button and the Reel.
 import * as ws from "./ws.js";
 import { createReel } from "./reel.js";
+import { createRegions } from "./regions.js";
+import { bindCollapsible } from "./collapsible.js";
 import { confettiBurst } from "./confetti.js";
 import { audioCtx, bindSoundToggle, followReel, soundOn } from "./sound.js";
 
@@ -66,104 +68,71 @@ const reel = createReel({
 });
 followReel(reel);
 
-/* ---------- Partial refresh ---------- */
-// Fetch-based refresh: independent of any CDN so partials always re-render.
-async function swapPartial(url, selector) {
-  // Never tear down the Reel mid-Reveal; it asks for a refresh when idle.
-  // Asked again once the response is in: a refresh fetched just before a
-  // spin must not land during it.
-  if (selector === "#result" && reel.busy()) return;
-  if (!document.querySelector(selector)) return;
-  let resp;
-  try {
-    resp = await fetch(url);
-  } catch {
-    return;
-  }
-  if (!resp.ok) return;
-  const html = await resp.text();
-  if (selector === "#result" && reel.busy()) return;
-  const target = document.querySelector(selector);
-  if (!target) return;
-  const wrap = document.createElement("template");
-  wrap.innerHTML = html;
-  const node = wrap.content.firstElementChild;
-  if (!node) return;
+/* ---------- Regions ---------- */
+// Each region of the page that refreshes on its own, with what it keeps.
+// Names match the server's Region constants (handler/helpers.go): a
+// "changed" event names the stale ones.
+const regions = createRegions({ reel });
 
-  // Replacing the section rebuilds its scrollports (resetting their
-  // position) and drops a focused input; capture both so the table
-  // neither jumps nor steals the caret mid-edit.
-  const scroller = target.querySelector(".rows-scroll");
-  const scrollTop = scroller ? scroller.scrollTop : 0;
-  const tableEl = target.querySelector(".table");
-  const scrollLeft = tableEl ? tableEl.scrollLeft : 0;
-  const focus = captureFocus(target);
+regions.define("table", {
+  url: "/partials/table",
+  target: "#entry-table",
+  // Replacing the section rebuilds its scrollports and drops a focused
+  // field, so the table neither jumps nor steals the caret mid-edit.
+  keep: { scroll: [".rows-scroll", ".table"], focus: true, fitHeight: syncNameFieldHeights },
+  after: updateEligibility,
+});
 
-  target.replaceWith(node);
+regions.define("filter", {
+  url: "/partials/filter",
+  target: "#filter-bar",
+  // The selected Tags live in the browser; put the chips back.
+  after: renderFilterZones,
+});
 
-  // Fit the name fields (and restore any in-flight edit, which also changes
-  // their height) BEFORE pinning the scrollports, so the saved offsets are
-  // applied and clamped against the final layout, not the collapsed
-  // one-line textareas.
-  restoreFocus(node, focus);
-  syncNameFieldHeights(node);
+regions.define("history", {
+  url: "/partials/history",
+  target: "#history",
+});
 
-  const newScroller = node.querySelector(".rows-scroll");
-  if (newScroller) newScroller.scrollTop = Math.min(scrollTop, newScroller.scrollHeight);
-  const newTable = node.querySelector(".table");
-  if (newTable) newTable.scrollLeft = Math.min(scrollLeft, newTable.scrollWidth);
-
-  if (selector === "#filter-bar") renderFilterZones();
-  syncHistoryBtnLabel();
-  syncEntriesBtnLabel();
-  updateEligibility();
-  if (selector === "#result") {
+regions.define("result", {
+  url: "/partials/result",
+  target: "#result",
+  // Never tear down the Reel mid-Reveal.
+  waitForIdle: true,
+  after: () => {
     syncDrawBtn();
     reel.dress();
-  }
-}
+  },
+});
 
+regions.define("tag-popover", {
+  // Only while the Tag dialog is open for an Entry.
+  url: () => (tagEntry ? `/partials/tag-popover/${tagEntry}` : null),
+  target: "#tag-dialog-content",
+  swap: "inner",
+});
 
-// The swap would silently discard an edit that has not blurred yet, so the
-// in-flight value is captured and put back after the re-render.
-function captureFocus(target) {
-  const el = document.activeElement;
-  if (!el || !target.contains(el)) return null;
-  const row = el.closest("[data-id]");
-  return {
-    id: el.id || null,
-    rowId: row ? row.dataset.id : null,
-    field: el.dataset?.field || null,
-    value: el.value,
-    selStart: el.selectionStart,
-    selEnd: el.selectionEnd,
-  };
-}
-
-function restoreFocus(root, state) {
-  if (!state) return;
-  let el = null;
-  if (state.id) el = root.querySelector("#" + state.id);
-  else if (state.rowId && state.field)
-    el = root.querySelector(`[data-id="${state.rowId}"] [data-field="${state.field}"]`);
-  if (!el || typeof el.focus !== "function") return;
-  el.focus();
-  if (state.field === "pick_count" || state.field === "excluded") return;
-  el.value = state.value;
-  try {
-    el.setSelectionRange(state.selStart, state.selEnd);
-  } catch {}
-}
-
-function refreshPartials() {
-  swapPartial("/partials/table", "#entry-table");
-  swapPartial("/partials/filter", "#filter-bar");
-  swapPartial("/partials/history", "#history");
-  swapPartial("/partials/result", "#result");
-}
+regions.define("list-name", {
+  url: "/api/list-name",
+  target: "#list-name",
+  apply: (text) => {
+    let name;
+    try {
+      name = JSON.parse(text).name;
+    } catch {
+      return;
+    }
+    if (typeof name !== "string") return;
+    updateExportLinks(name);
+    // Never overwrite the host's own edit in progress.
+    const input = $("#list-name");
+    if (input && document.activeElement !== input) input.value = name;
+  },
+});
 
 function refreshIfNoWS() {
-  if (!ws.connected()) refreshPartials();
+  if (!ws.connected()) regions.refreshAll();
 }
 
 
@@ -231,7 +200,7 @@ async function doDraw() {
 }
 
 function fallbackRenderWinner(data) {
-  refreshPartials();
+  regions.refreshAll();
   if (data?.winner?.name) {
     toast(`The winner is ${data.winner.name}`);
     // No socket means no Reel, but this is still the moment of reveal.
@@ -241,7 +210,7 @@ function fallbackRenderWinner(data) {
 
 reel.onIdle(() => {
   setDrawPending(false);
-  refreshPartials();
+  regions.refreshAll();
 });
 
 /* ---------- Reel orientation ---------- */
@@ -266,7 +235,7 @@ function bindReelToggle() {
     syncReelToggle();
     // The resting track was dressed for the old orientation (or left bare
     // for the new one); re-render it so the drum matches.
-    swapPartial("/partials/result", "#result");
+    regions.refresh(["result"]);
   });
 }
 
@@ -420,17 +389,18 @@ let tagEntry = null;
 const currentTagEntry = () => tagEntry;
 
 async function openTagDialog(id) {
-  tagEntry = id;
   const dialog = $("#tag-dialog");
   const content = $("#tag-dialog-content");
   if (!dialog || !content) return;
-  try {
-    const resp = await fetch(`/partials/tag-popover/${id}`);
-    content.innerHTML = await resp.text();
-    dialog.showModal();
-  } catch {
+  tagEntry = id;
+  content.replaceChildren();
+  await regions.refresh(["tag-popover"]);
+  if (!content.firstElementChild) {
+    tagEntry = null;
     toast("Could not load tags.");
+    return;
   }
+  dialog.showModal();
 }
 
 async function addTagToEntry(name, id) {
@@ -445,6 +415,10 @@ async function addTagToEntry(name, id) {
 }
 
 function bindTagDialog() {
+  // A closed dialog has no Entry, so its region stops refreshing.
+  $("#tag-dialog")?.addEventListener("close", () => {
+    tagEntry = null;
+  });
   document.addEventListener("submit", (e) => {
     if (e.target.id !== "tag-new-form") return;
     e.preventDefault();
@@ -637,8 +611,7 @@ function bindWS() {
     syncDrawBtn();
   });
   ws.on("winner", (data) => reel.land(data && data.winner && data.winner.name));
-  ws.on("undo", () => refreshPartials());
-  ws.on("entries", () => refreshPartials());
+  ws.on("changed", (data) => regions.refresh(data?.regions || regions.names()));
 }
 
 /* ---------- DB health ---------- */
@@ -675,68 +648,6 @@ function bindIEDialog() {
       dialog.close();
     } else if (e.target === dialog) {
       dialog.close(); // backdrop click
-    }
-  });
-}
-
-/* ---------- History show/hide ---------- */
-function syncHistoryBtnLabel() {
-  const btn = $("#history-toggle-btn");
-  if (!btn) return;
-  btn.textContent =
-    localStorage.getItem("raffle-history-visible") === "1" ? "Hide history" : "Show history";
-}
-
-function setHistoryVisible(visible, animate) {
-  const grid = $(".grid");
-  if (!grid) return;
-  if (!animate) grid.classList.add("grid-no-anim");
-  grid.classList.toggle("no-history", !visible);
-  if (!animate) requestAnimationFrame(() => grid.classList.remove("grid-no-anim"));
-  syncHistoryBtnLabel();
-}
-
-function bindHistoryToggle() {
-  const saved = localStorage.getItem("raffle-history-visible") === "1";
-  setHistoryVisible(saved, false);
-  // #history-toggle-btn lives in the swapped result partial, so handle it
-  // via delegation rather than a direct listener.
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("#history-toggle-btn")) {
-      const next = localStorage.getItem("raffle-history-visible") !== "1";
-      localStorage.setItem("raffle-history-visible", next ? "1" : "0");
-      setHistoryVisible(next, true);
-    }
-  });
-}
-
-/* ---------- Entries show/hide ---------- */
-function syncEntriesBtnLabel() {
-  const btn = $("#entries-toggle-btn");
-  if (!btn) return;
-  btn.textContent =
-    localStorage.getItem("raffle-entries-visible") === "1" ? "Hide entries" : "Show entries";
-}
-
-function setEntriesVisible(visible, animate) {
-  const grid = $(".grid");
-  if (!grid) return;
-  if (!animate) grid.classList.add("grid-no-anim");
-  grid.classList.toggle("no-entries", !visible);
-  if (!animate) requestAnimationFrame(() => grid.classList.remove("grid-no-anim"));
-  syncEntriesBtnLabel();
-}
-
-function bindEntriesToggle() {
-  const saved = localStorage.getItem("raffle-entries-visible") === "1";
-  setEntriesVisible(saved, false);
-  // #entries-toggle-btn lives in the swapped result partial, so handle it
-  // via delegation rather than a direct listener.
-  document.addEventListener("click", (e) => {
-    if (e.target.closest("#entries-toggle-btn")) {
-      const next = localStorage.getItem("raffle-entries-visible") !== "1";
-      localStorage.setItem("raffle-entries-visible", next ? "1" : "0");
-      setEntriesVisible(next, true);
     }
   });
 }
@@ -791,8 +702,8 @@ function init() {
   checkDb();
   setInterval(checkDb, 5000);
   bindIEDialog();
-  bindHistoryToggle();
-  bindEntriesToggle();
+  bindCollapsible("history");
+  bindCollapsible("entries");
   bindSoundToggle();
   bindReelToggle();
   reel.dress();
