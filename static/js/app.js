@@ -1407,10 +1407,12 @@
 
   function updateExportLinks(name) {
     const safeName = name.trim() || "raffle";
-    const jsonLink = document.querySelector('a[href="/api/export?format=json"]');
-    const csvLink = document.querySelector('a[href="/api/export?format=csv"]');
-    if (jsonLink) jsonLink.href = `/api/export?format=json&name=${encodeURIComponent(safeName)}`;
-    if (csvLink) csvLink.href = `/api/export?format=csv&name=${encodeURIComponent(safeName)}`;
+    // Found by a stable identity, not by their address, so every rename
+    // (not just the first) rewrites them.
+    for (const link of $$("a[data-export-format]")) {
+      const format = encodeURIComponent(link.dataset.exportFormat);
+      link.href = `/api/export?format=${format}&name=${encodeURIComponent(safeName)}`;
+    }
   }
 
   function saveListName(name) {
