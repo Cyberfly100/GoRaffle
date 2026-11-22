@@ -16,8 +16,8 @@ async function preferVerticalReel(page) {
 // Opens the Entries card the way the host does, if it is collapsed.
 async function showEntries(page) {
   const toggle = page.locator("#entries-toggle-btn");
-  if ((await toggle.textContent()).trim() === "Show entries") await toggle.click();
-  await expect(toggle).toHaveText("Hide entries");
+  if ((await toggle.innerText()).trim() === "Show entries") await toggle.click();
+  await expect(toggle).toHaveText("Hide entries", { useInnerText: true });
 }
 
 // Opens the Import / Export dialog (it lives in the Entries card).
@@ -219,7 +219,86 @@ async function blockWebSocket(page) {
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close());
 }
 
+// Waits until the page receives other browsers' changes live.
+async function waitForLiveUpdates(page) {
+  await expect(page.locator("#ws-status")).toHaveClass(/\bconnected\b/);
+}
+
+// Another browser changes the named Entry (fields as in PUT /api/entries/{id}).
+async function otherBrowserChangesEntry(request, name, change) {
+  const entries = await (await request.get("/api/entries")).json();
+  const entry = entries.find((e) => e.name === name);
+  if (!entry) throw new Error(`no Entry named ${name}`);
+  const resp = await request.put(`/api/entries/${entry.id}`, { data: change });
+  if (!resp.ok()) throw new Error(`change ${name}: ${resp.status()}`);
+}
+
+const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+
+// The table row of the Entry the server knows by this name.
+function entryRow(page, name) {
+  return page
+    .locator("#entry-table [data-id]")
+    .filter({ has: page.locator('textarea[data-field="name"]', { hasText: exactly(name) }) });
+}
+
+function nameField(page, name) {
+  return entryRow(page, name).locator('textarea[data-field="name"]');
+}
+
+function pickCountField(page, name) {
+  return entryRow(page, name).locator('input[data-field="pick_count"]');
+}
+
+// Records which regions the page fetches from now on; returns a reader.
+function recordRegionFetches(page) {
+  const seen = [];
+  page.on("request", (req) => {
+    const path = new URL(req.url()).pathname;
+    if (path.startsWith("/partials/") || path === "/api/list-name") seen.push(path);
+  });
+  return () => [...seen];
+}
+
+const sections = {
+  history: { body: "#history", toggle: "#history-toggle-btn" },
+  entries: { body: "#entry-table", toggle: "#entries-toggle-btn" },
+};
+
+// Asserts a collapsible section is (not) on screen and its toggle says so.
+async function expectSection(page, section, visible) {
+  const s = sections[section];
+  await expect(page.locator(s.toggle)).toHaveText(`${visible ? "Hide" : "Show"} ${section}`, {
+    useInnerText: true,
+  });
+  await expect
+    .poll(() =>
+      page.locator(s.body).evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        const onScreen = box.width > 0 && box.height > 0 && box.right > 0 && box.left < innerWidth;
+        return onScreen && el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+      })
+    )
+    .toBe(visible);
+}
+
+// Opens the app in a second, independent browser (its own storage). Close it
+// with `page.context().close()`.
+async function secondBrowser(browser, testInfo) {
+  const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL });
+  const page = await context.newPage();
+  await page.goto("/");
+  return page;
+}
+
 module.exports = {
+  waitForLiveUpdates,
+  otherBrowserChangesEntry,
+  nameField,
+  pickCountField,
+  recordRegionFetches,
+  expectSection,
+  secondBrowser,
   showEntriesOnLoad,
   showEntries,
   preferVerticalReel,

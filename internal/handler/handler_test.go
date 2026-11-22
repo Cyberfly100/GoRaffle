@@ -158,7 +158,7 @@ func TestIndexAndEmptyState(t *testing.T) {
 	}
 	// The browser code is native ES modules: browsers refuse a module that is
 	// not served with a JavaScript MIME type.
-	for _, path := range []string{"/static/js/app.js", "/static/js/ws.js", "/static/js/reel.js", "/static/js/reel-plan.js", "/static/js/sound.js", "/static/js/confetti.js"} {
+	for _, path := range []string{"/static/js/app.js", "/static/js/ws.js", "/static/js/reel.js", "/static/js/reel-plan.js", "/static/js/sound.js", "/static/js/confetti.js", "/static/js/regions.js", "/static/js/collapsible.js"} {
 		res, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -327,42 +327,6 @@ func TestImportEmptyJSONErrors(t *testing.T) {
 			t.Errorf("import %s error should mention entries, got %s", body, bodyRaw)
 		}
 	}
-}
-
-// WS: a connected browser receives the change broadcast over the websocket.
-func TestWebSocketBroadcast(t *testing.T) {
-	ts := newTestServer(t)
-
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial ws: %v", err)
-	}
-	defer conn.Close()
-
-	// Give the hub event loop a moment to register the client, then trigger
-	// broadcasts through the API.
-	time.Sleep(50 * time.Millisecond)
-	postJSON(t, ts, "/api/reset", "")
-	postJSON(t, ts, "/api/reset", "")
-
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for i := 0; i < 3; i++ {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("read ws: %v", err)
-		}
-		var evt struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(msg, &evt); err != nil {
-			t.Fatalf("event JSON: %v (%s)", err, msg)
-		}
-		if evt.Type == "entries" {
-			return // got a live broadcast
-		}
-	}
-	t.Error("no entries event received over websocket")
 }
 
 // revealEvent is the one websocket event a Draw sends.

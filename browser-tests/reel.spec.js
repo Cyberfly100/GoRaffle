@@ -118,7 +118,8 @@ test("a refresh of the result that lands mid-spin leaves the Reel running", asyn
     await route.fulfill({ response: resp });
   });
   const refreshing = page.waitForRequest("**/partials/result");
-  await request.post("/api/entries", { data: { name: "Barbara" } });
+  // A rename makes the result stale (it shows Entry names).
+  await h.otherBrowserChangesEntry(request, NAMES[0], { name: "Barbara" });
   await refreshing;
 
   const landing = h.nextLanding(page);

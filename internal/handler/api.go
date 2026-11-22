@@ -39,7 +39,7 @@ func (s *Server) addEntry(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "add entry")
 		return
 	}
-	s.broadcast(EventEntries, c)
+	s.changed(RegionTable)
 	writeJSON(w, http.StatusCreated, c)
 }
 
@@ -83,7 +83,12 @@ func (s *Server) updateEntry(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "fetch updated entry")
 		return
 	}
-	s.broadcast(EventEntries, updated)
+	if req.Name != nil {
+		// History and the result show Entry names.
+		s.changed(RegionTable, RegionHistory, RegionResult)
+	} else {
+		s.changed(RegionTable)
+	}
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -97,7 +102,7 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		handleNotFound(w, err)
 		return
 	}
-	s.broadcast(EventEntries, map[string]int{"id": id})
+	s.changed(RegionTable, RegionHistory, RegionResult)
 	writeJSON(w, http.StatusOK, map[string]int{"id": id})
 }
 
@@ -107,7 +112,7 @@ func (s *Server) clearEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.lastReveal.forget()
-	s.broadcast(EventEntries, map[string]bool{"cleared": true})
+	s.changed(RegionTable, RegionHistory, RegionResult, RegionTagPopover)
 	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
 }
 
@@ -169,7 +174,7 @@ func (s *Server) addEntryTag(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "list tags")
 		return
 	}
-	s.broadcast(EventEntries, tags)
+	s.changed(RegionTable, RegionFilter, RegionTagPopover)
 	writeJSON(w, http.StatusCreated, tags)
 }
 
@@ -188,7 +193,7 @@ func (s *Server) deleteEntryTag(w http.ResponseWriter, r *http.Request) {
 		handleNotFound(w, err)
 		return
 	}
-	s.broadcast(EventEntries, map[string]int{"id": id, "tag_id": tagID})
+	s.changed(RegionTable, RegionTagPopover)
 	writeJSON(w, http.StatusOK, map[string]int{"id": id, "tag_id": tagID})
 }
 

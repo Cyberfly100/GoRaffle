@@ -27,10 +27,31 @@ type Event struct {
 }
 
 const (
-	EventReveal  = "reveal"
-	EventUndo    = "undo"
-	EventEntries = "entries"
+	EventReveal = "reveal"
+	// EventChanged is the one change event: it names the page regions a
+	// change made stale, and browsers refresh exactly those.
+	EventChanged = "changed"
 )
+
+// Region names a part of the page a browser refreshes on its own. The
+// browser's region declarations (static/js/regions.js) use the same names.
+type Region string
+
+const (
+	RegionTable      Region = "table"
+	RegionHistory    Region = "history"
+	RegionResult     Region = "result"
+	RegionFilter     Region = "filter"
+	RegionTagPopover Region = "tag-popover"
+	RegionListName   Region = "list-name"
+)
+
+// Changed is the "changed" event's data. Info, when set, is a message for
+// the host (the Undo toast text).
+type Changed struct {
+	Regions []Region `json:"regions"`
+	Info    string   `json:"info,omitempty"`
+}
 
 // marshalEvent JSON-encodes an Event for WS broadcast.
 func marshalEvent(eventType string, data any) ([]byte, error) {
