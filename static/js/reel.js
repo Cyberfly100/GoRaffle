@@ -28,12 +28,12 @@
 // internal/raffle/timing.go), and rendered into the page as the
 // #reveal-timing JSON; the server's replay window is derived from the same
 // values. The Reel reads them here and keeps no copy of its own.
-import { planLanding, cruiseSpeed, HORIZONTAL, VERTICAL } from "./reel-plan.js";
+import { planLanding, beltSpeed, HORIZONTAL, VERTICAL } from "./reel-plan.js";
 import { confettiBurst } from "./confetti.js";
 
-// The belt cruises at the Reel speed (names per second, see cruiseSpeed),
-// constant for the whole cruise so the landing can hand over without a jump
-// in speed. Wind-up + cruise fill the Suspense, then the landing runs.
+// The belt cruises at a constant beltSpeed (px/ms), which is the Reel speed
+// (names per second) for its cell size, so the landing can hand over without
+// a jump in speed. Wind-up + cruise fill the Suspense, then the landing runs.
 const WINDUP_MS = 900;
 const timing = readTiming();
 // How long the belt runs (wind-up included) before it starts landing.
@@ -43,7 +43,9 @@ export const LANDING_MS = timing.landing_ms;
 const LANDING_MAX_MS = timing.landing_max_ms;
 // The landed winner stays on the belt this long before the Reel is idle.
 const SETTLE_MS = timing.settle_ms;
-const MIN_LANDING_SPEED = 0.15;
+// A landing that starts while the belt is still winding up coasts from at
+// least this share of the cruise speed, so it never crawls.
+const MIN_LANDING_SHARE = 0.035;
 
 function readTiming() {
   const el = document.getElementById("reveal-timing");
@@ -136,7 +138,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     const visibleCells = Math.max(2, Math.ceil(viewport / cellSize) + 1);
     const seq = spreadSequence(names, visibleCells);
     const loopLen = seq.length * cellSize;
-    const cruise = cruiseSpeed(cellSize);
+    const cruise = beltSpeed(cellSize);
     const windupDist = (cruise * WINDUP_MS) / 2;
 
     // Keep the name that is already on screen (the resting winner, not a
@@ -202,7 +204,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     const headCount = 2 + beforeCells.length + afterCells.length;
     const headEnd = track.children[headCount - 1].getBoundingClientRect()[ax.rectEnd];
     const base = headEnd - track.getBoundingClientRect()[ax.rectStart];
-    belt = { seq, cellSize, base, headCount, cruise };
+    belt = { seq, cellSize, base, headCount };
     lastCycle = seq;
 
     // The strip travels one sequence per cycle, so it must be at least one
@@ -272,8 +274,9 @@ export function createReel({ orientation = "horizontal" } = {}) {
 
     // Hand over from the belt's real speed (it may still be winding up).
     const fresh = performance.now() - speed.at < 120;
-    const { seq, cellSize, base, headCount, cruise } = belt;
-    const v0 = Math.max(MIN_LANDING_SPEED, Math.min(cruise, fresh ? speed.value : cruise));
+    const { seq, cellSize, base, headCount } = belt;
+    const cruise = beltSpeed(cellSize);
+    const v0 = Math.max(cruise * MIN_LANDING_SHARE, Math.min(cruise, fresh ? speed.value : cruise));
     const strip = [...track.children].slice(headCount).map((c) => c.textContent);
     const plan = planLanding({
       axis: ax,

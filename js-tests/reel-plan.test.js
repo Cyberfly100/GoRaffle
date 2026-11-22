@@ -1,7 +1,7 @@
 // Pure tests for the Reel's landing planner. Run: node --test 'js-tests/*.test.js'
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planLanding, cruiseSpeed, HORIZONTAL, VERTICAL } from "../static/js/reel-plan.js";
+import { planLanding, beltSpeed, HORIZONTAL, VERTICAL } from "../static/js/reel-plan.js";
 
 const CYCLE = ["Ada", "Grace", "Linus", "Margaret", "Ken"];
 
@@ -92,8 +92,9 @@ test("the landing coasts down from the current speed: distance = speed x duratio
     // belt's current speed, or the belt visibly jumps.
     const startSpeed = (2 * plan.distance) / plan.duration;
     assert.ok(Math.abs(startSpeed - c.speed) < 1e-9, `starts at ${startSpeed} not ${c.speed} for ${JSON.stringify(c)}`);
-    // Coasting from 4.35 px/ms over 1800 ms covers 3915 px; the winner sits
-    // on the nearest grid cell to that (at most one more to dodge a copy).
+    // Coasting from the belt's speed over landMs covers speed * landMs / 2;
+    // the winner sits on the nearest grid cell to that (at most one more to
+    // dodge a copy).
     const ideal = (c.speed * g.landMs) / 2;
     if (ideal >= c.windowSize + c.cellSize) {
       assert.ok(Math.abs(plan.distance - ideal) <= 1.5 * c.cellSize, `distance ${plan.distance} vs ${ideal} for ${JSON.stringify(c)}`);
@@ -111,13 +112,13 @@ test("horizontal and vertical give the same plan for the same geometry", () => {
 // Reel speed: 16 names pass the window per second in either orientation,
 // but the belt never moves faster than 4.35 px/ms (wide names stay readable).
 test("a vertical Reel (48 px cells) cruises at 16 names per second", () => {
-  assert.ok(Math.abs(cruiseSpeed(48) - 0.768) < 1e-9);
+  assert.ok(Math.abs(beltSpeed(48) - 0.768) < 1e-9);
 });
 
 test("a horizontal Reel with short names (128 px cells) cruises at 16 names per second", () => {
-  assert.ok(Math.abs(cruiseSpeed(128) - 2.048) < 1e-9);
+  assert.ok(Math.abs(beltSpeed(128) - 2.048) < 1e-9);
 });
 
 test("a horizontal Reel with very long names is capped at 4.35 px/ms", () => {
-  assert.equal(cruiseSpeed(400), 4.35);
+  assert.equal(beltSpeed(400), 4.35);
 });

@@ -317,22 +317,30 @@ async function tableMarking(page) {
 
 // Names per second passing the Reel window while it cruises (the Reel speed
 // the audience sees). Samples the belt frame by frame between `fromMs` and
-// `toMs` after it starts moving; the cruise is a looping animation, so frames
-// where the belt jumps back to the loop start are left out. Call right after
-// the Draw.
+// `toMs` after it starts moving, measuring only what is on screen: the
+// belt's position along whichever axis it moves, and the name cells' size on
+// that axis. The cruise loops, so frames where the belt jumps back to the
+// loop start are left out. Call right after the Draw.
 async function cruisingNamesPerSecond(page, { fromMs = 1000, toMs = 1700 } = {}) {
   return page.evaluate(
     ({ fromMs, toMs }) =>
       new Promise((resolve, reject) => {
         const track = () => document.querySelector("#result .reel-track");
-        const vertical = () => document.body.classList.contains("reel-vertical");
-        const offset = () => {
+        const position = () => {
           const m = new DOMMatrix(getComputedStyle(track()).transform);
-          return vertical() ? m.m42 : m.m41;
+          return { x: m.m41, y: m.m42 };
         };
-        const cellSize = () =>
-          parseFloat(getComputedStyle(document.querySelector("#result .reel")).getPropertyValue(vertical() ? "--cell-h" : "--cell-w"));
+        // Median name-cell size: the grid cells outnumber the carried resting
+        // cell, which can be wider (e.g. "Welcome to the draw!").
+        const cellSize = (axis) => {
+          const sizes = [...track().querySelectorAll(".reel-cell")]
+            .map((c) => c.getBoundingClientRect()[axis === "x" ? "width" : "height"])
+            .sort((p, q) => p - q);
+          return sizes[Math.floor(sizes.length / 2)];
+        };
+        const rest = track() && position();
         let start = null;
+        let axis = null;
         let prev = null;
         let px = 0;
         let ms = 0;
@@ -340,10 +348,14 @@ async function cruisingNamesPerSecond(page, { fromMs = 1000, toMs = 1700 } = {})
         const step = () => {
           const now = performance.now();
           if (now > giveUp) return reject(new Error("Reel never cruised"));
+          const pos = track() && position();
           if (start === null) {
-            if (track() && offset() !== 0) start = now;
+            if (pos && rest && (pos.x !== rest.x || pos.y !== rest.y)) {
+              start = now;
+              axis = pos.x !== rest.x ? "x" : "y";
+            }
           } else if (now - start >= fromMs) {
-            const cur = { at: now, offset: offset() };
+            const cur = { at: now, offset: pos[axis] };
             if (prev) {
               const moved = prev.offset - cur.offset; // the belt moves towards negative offsets
               if (moved > 0) {
@@ -352,7 +364,7 @@ async function cruisingNamesPerSecond(page, { fromMs = 1000, toMs = 1700 } = {})
               }
             }
             prev = cur;
-            if (now - start >= toMs) return resolve(px / cellSize() / (ms / 1000));
+            if (now - start >= toMs) return resolve(px / cellSize(axis) / (ms / 1000));
           }
           requestAnimationFrame(step);
         };

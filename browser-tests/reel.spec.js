@@ -135,9 +135,9 @@ test("the vertical and horizontal Reels pass names at about the same Reel speed"
   await seedEntries(request, NAMES);
   const speeds = {};
   for (const orientation of ["horizontal", "vertical"]) {
+    // A fresh page shows the horizontal Reel; the second round prefers vertical.
+    if (orientation === "vertical") await h.preferVerticalReel(page);
     await page.goto("/");
-    await page.evaluate((v) => localStorage.setItem("raffle-reel-mode", v), orientation === "vertical" ? "v" : "h");
-    await page.reload();
     const landing = h.nextLanding(page);
     const measured = h.cruisingNamesPerSecond(page);
     await h.clickDraw(page);

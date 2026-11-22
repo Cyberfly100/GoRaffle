@@ -37,15 +37,16 @@ export const VERTICAL = Object.freeze({
   rectEnd: "bottom",
 });
 
-// Reel speed (see GLOSSARY.md) is names per second, not pixels: 16 names pass
-// the window each second whichever way the Reel runs. Wide horizontal cells
-// would make that fast to the eye, so the belt never exceeds MAX_BELT_SPEED.
-export const NAMES_PER_SECOND = 16;
-export const MAX_BELT_SPEED = 4.35; // px/ms
+// Reel speed (see GLOSSARY.md) is names per second: 16 names pass the window
+// each second whichever way the Reel runs. The belt moves in px/ms, so its
+// speed depends on the cell size; wide horizontal cells would make that fast
+// to the eye, so the belt never exceeds MAX_BELT_PX_PER_MS.
+const REEL_SPEED_NAMES_PER_SECOND = 16;
+const MAX_BELT_PX_PER_MS = 4.35;
 
-// cruiseSpeed returns the belt's cruising speed in px/ms for a cell size in px.
-export function cruiseSpeed(cellSize) {
-  return Math.min((cellSize * NAMES_PER_SECOND) / 1000, MAX_BELT_SPEED);
+// beltSpeed returns the belt's cruising speed in px/ms for a cell size in px.
+export function beltSpeed(cellSize) {
+  return Math.min((cellSize * REEL_SPEED_NAMES_PER_SECOND) / 1000, MAX_BELT_PX_PER_MS);
 }
 
 // planLanding returns the landing plan:
