@@ -1219,7 +1219,13 @@
     }
     const form = new FormData();
     form.append("file", file);
-    const resp = await fetch("/api/import", { method: "POST", body: form });
+    let resp;
+    try {
+      resp = await fetch("/api/import", { method: "POST", body: form });
+    } catch {
+      toast("Could not reach the server.");
+      return;
+    }
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       toast(data.error || "Import failed.");

@@ -13,8 +13,16 @@ async function preferVerticalReel(page) {
   await page.addInitScript(() => localStorage.setItem("raffle-reel-mode", "v"));
 }
 
-// Opens the Import / Export dialog.
+// Opens the Entries card the way the host does, if it is collapsed.
+async function showEntries(page) {
+  const toggle = page.locator("#entries-toggle-btn");
+  if ((await toggle.textContent()).trim() === "Show entries") await toggle.click();
+  await expect(toggle).toHaveText("Hide entries");
+}
+
+// Opens the Import / Export dialog (it lives in the Entries card).
 async function openImportExport(page) {
+  await showEntries(page);
   await page.locator("#ie-open-btn").click();
   await expect(page.locator("#ie-dialog")).toBeVisible();
 }
@@ -73,6 +81,7 @@ async function blockWebSocket(page) {
 
 module.exports = {
   showEntriesOnLoad,
+  showEntries,
   preferVerticalReel,
   openImportExport,
   closeImportExport,
