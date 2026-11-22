@@ -179,7 +179,6 @@
       toast(data.error || "Draw failed.");
       return null;
     }
-    window.__pendingWinner = data;
     // When the socket is live, suspense + winner arrive via WS.
     if (!window.Raffle.wsConnected()) fallbackRenderWinner(data);
     return data;

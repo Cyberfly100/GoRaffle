@@ -47,7 +47,6 @@
     ws.onclose = () => {
       state.connected = false;
       setStatus("reconnecting");
-      window.Raffle.emitFallbackDraw && window.Raffle.emitFallbackDraw();
       setTimeout(connect, state.reconnectDelay);
       state.reconnectDelay = Math.min(state.reconnectDelay * 2, 15000);
     };
