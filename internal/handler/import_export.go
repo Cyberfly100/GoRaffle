@@ -6,9 +6,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/goraffle/raffle/internal/listexchange"
 )
@@ -70,42 +68,6 @@ func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 		safeName = "raffle"
 	}
 	writeAttachment(w, format.ContentType(), safeName+"."+format.Extension(), body)
-}
-
-func (s *Server) exportHistory(w http.ResponseWriter, r *http.Request) {
-	picks, err := s.store.ListHistory(r.Context())
-	if err != nil {
-		slogError(w, err, "list history for export")
-		return
-	}
-
-	format := queryFormat(r, "csv")
-	switch format {
-	case "json":
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Disposition", `attachment; filename="raffle-history.json"`)
-		_ = json.NewEncoder(w).Encode(picks)
-	case "csv":
-		rows := make([][]string, 0, len(picks))
-		for _, p := range picks {
-			// Same order as the on-screen history: most recent draw first.
-			rows = append(rows, []string{
-				strconv.Itoa(p.ID),
-				strconv.Itoa(p.PickNumber),
-				strconv.Itoa(p.EntryID),
-				p.EntryName,
-				p.PickedAt.UTC().Format(time.RFC3339),
-			})
-		}
-		body, err := listexchange.WriteCSV([]string{"draw_id", "pick_number", "entry_id", "entry_name", "picked_at"}, rows)
-		if err != nil {
-			slogError(w, err, "encode history csv")
-			return
-		}
-		writeAttachment(w, listexchange.CSV.ContentType(), "raffle-history.csv", body)
-	default:
-		writeErr(w, http.StatusBadRequest, "format must be json or csv")
-	}
 }
 
 // importData reads an uploaded (multipart "file" field) or directly posted

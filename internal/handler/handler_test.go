@@ -397,9 +397,6 @@ func TestImportMerges(t *testing.T) {
 	if r.Added != 1 {
 		t.Errorf("legacy-keyed import added=%d, want 1", r.Added)
 	}
-
-	// CSV export has a header.
-	assertBodyContains(t, ts, "/api/export?format=csv", "name")
 }
 
 // An import whose JSON parses but carries zero rows must error, not silently
@@ -683,58 +680,6 @@ func mustJSON(t *testing.T, v any) string {
 		t.Fatalf("marshal: %v", err)
 	}
 	return string(b)
-}
-
-func TestHistoryExportCSV(t *testing.T) {
-	ts := newTestServer(t)
-	postJSON(t, ts, "/api/entries", `{"name":"Alice"}`)
-	postJSON(t, ts, "/api/entries", `{"name":"Bob"}`)
-
-	postJSON(t, ts, "/api/draw", `{}`)
-	postJSON(t, ts, "/api/draw", `{}`)
-
-	res := doReq(t, ts, "GET", "/api/export/history?format=csv", nil)
-	if res.StatusCode != 200 {
-		t.Fatalf("history csv = %d", res.StatusCode)
-	}
-	body, _ := io.ReadAll(res.Body)
-	res.Body.Close()
-
-	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("history csv lines = %d, want header + 2 draws:\n%s", len(lines), body)
-	}
-	if lines[0] != "draw_id,pick_number,entry_id,entry_name,picked_at" {
-		t.Errorf("csv header = %q", lines[0])
-	}
-	for _, line := range lines[1:] {
-		cols := strings.Split(line, ",")
-		if len(cols) != 5 {
-			t.Errorf("csv row = %q, want 5 columns", line)
-			continue
-		}
-		if cols[3] != "Alice" && cols[3] != "Bob" {
-			t.Errorf("csv winner = %q, want Alice or Bob", cols[3])
-		}
-		if _, err := time.Parse(time.RFC3339, cols[4]); err != nil {
-			t.Errorf("csv picked_at %q not RFC3339: %v", cols[4], err)
-		}
-	}
-
-	// JSON export carries entry ids/names for stats joins.
-	res = doReq(t, ts, "GET", "/api/export/history?format=json", nil)
-	body, _ = io.ReadAll(res.Body)
-	res.Body.Close()
-	var picks []model.Pick
-	if err := json.Unmarshal(body, &picks); err != nil {
-		t.Fatalf("history json: %v (%s)", err, body)
-	}
-	if len(picks) != 2 {
-		t.Errorf("history json length = %d, want 2", len(picks))
-	}
-	if picks[0].EntryID == 0 || picks[0].EntryName == "" {
-		t.Errorf("history json pick lacks entry id/name: %+v", picks[0])
-	}
 }
 
 func TestDBHealth(t *testing.T) {

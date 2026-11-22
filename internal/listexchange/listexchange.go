@@ -1,5 +1,5 @@
-// Package listexchange owns the file formats a List is exported to and
-// imported from: JSON and CSV, in every shape GoRaffle has ever written.
+// Package listexchange owns the List file: the one JSON format a List is
+// exported as, and every shape GoRaffle has ever imported.
 //
 // It is pure: Decode turns uploaded bytes into a model.List and Encode turns a
 // model.List into bytes. Applying a decoded List to the database is the store's
@@ -14,6 +14,7 @@
 //   - CSV with an optional first row "list_name,<name>", an optional header
 //     row "name,pick_count,excluded,tags", then one row per Entry. Tags are
 //     separated by "|"; a literal "|" or "\" inside a Tag is escaped with "\".
+//     CSV is a legacy import format: it cannot carry the History.
 package listexchange
 
 import (
@@ -29,21 +30,19 @@ import (
 	"github.com/goraffle/raffle/internal/model"
 )
 
-// Format is an exchange file format.
+// Format is an export file format. The List file is JSON; there is no other
+// export format.
 type Format string
 
-const (
-	JSON Format = "json"
-	CSV  Format = "csv"
-)
+const JSON Format = "json"
 
 // ParseFormat validates a format name such as the export's ?format= value.
+// The CSV List export is gone, so it no longer accepts csv.
 func ParseFormat(s string) (Format, error) {
-	switch Format(s) {
-	case JSON, CSV:
-		return Format(s), nil
+	if Format(s) == JSON {
+		return JSON, nil
 	}
-	return "", errors.New("format must be json or csv")
+	return "", errors.New("format must be json")
 }
 
 // Extension is the file extension (without dot) for the format.
@@ -51,9 +50,6 @@ func (f Format) Extension() string { return string(f) }
 
 // ContentType is the MIME type a file in this format is served with.
 func (f Format) ContentType() string {
-	if f == CSV {
-		return "text/csv; charset=utf-8"
-	}
 	return "application/json"
 }
 
@@ -243,26 +239,13 @@ func splitTags(cell string) []string {
 	return append(tags, cur.String())
 }
 
-var tagEscaper = strings.NewReplacer(`\`, `\\`, `|`, `\|`)
-
-func joinTags(tags []string) string {
-	esc := make([]string, len(tags))
-	for i, t := range tags {
-		esc[i] = tagEscaper.Replace(t)
-	}
-	return strings.Join(esc, "|")
-}
-
-// Encode turns a List into a file in the given format. Absent PickCount and
-// Excluded are written as 0 and false.
+// Encode turns a List into a List file: JSON, the one export format. Absent
+// PickCount and Excluded are written as 0 and false.
 func Encode(l model.List, f Format) ([]byte, error) {
-	switch f {
-	case JSON:
-		return encodeJSON(l)
-	case CSV:
-		return encodeCSV(l)
+	if f != JSON {
+		return nil, fmt.Errorf("unknown format %q", f)
 	}
-	return nil, fmt.Errorf("unknown format %q", f)
+	return encodeJSON(l)
 }
 
 func encodeJSON(l model.List) ([]byte, error) {
@@ -290,38 +273,6 @@ func encodeJSON(l model.List) ([]byte, error) {
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(out); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func encodeCSV(l model.List) ([]byte, error) {
-	rows := make([][]string, 0, len(l.Entries)+2)
-	rows = append(rows,
-		[]string{"list_name", l.Name},
-		[]string{"name", "pick_count", "excluded", "tags"})
-	for _, e := range l.Entries {
-		rows = append(rows, []string{
-			e.Name,
-			strconv.Itoa(*intOr(e.PickCount, 0)),
-			strconv.FormatBool(*boolOr(e.Excluded, false)),
-			joinTags(e.Tags),
-		})
-	}
-	return WriteCSV(nil, rows)
-}
-
-// WriteCSV renders an optional header row and data rows as CSV. It is shared
-// with the History export.
-func WriteCSV(header []string, rows [][]string) ([]byte, error) {
-	var buf bytes.Buffer
-	w := csv.NewWriter(&buf)
-	if len(header) > 0 {
-		if err := w.Write(header); err != nil {
-			return nil, err
-		}
-	}
-	if err := w.WriteAll(rows); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

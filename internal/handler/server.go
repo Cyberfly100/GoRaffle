@@ -43,8 +43,9 @@ func NewServer(store *db.Store, engine *raffle.Engine, hub *ws.Hub, tmpl *templa
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// Pages
-	mux.HandleFunc("GET /", s.pageIndex)
+	// Pages. "/" is exact, so a removed endpoint (e.g. the old History
+	// export) fails with 404 instead of falling through to the page.
+	mux.HandleFunc("GET /{$}", s.pageIndex)
 	mux.HandleFunc("GET /partials/table", s.partialTable)
 	mux.HandleFunc("GET /partials/history", s.partialHistory)
 	mux.HandleFunc("GET /partials/result", s.partialResult)
@@ -72,7 +73,6 @@ func (s *Server) Routes() http.Handler {
 
 	// API — import / export
 	mux.HandleFunc("GET /api/export", s.exportData)
-	mux.HandleFunc("GET /api/export/history", s.exportHistory)
 	mux.HandleFunc("POST /api/import", s.importData)
 	mux.HandleFunc("GET /api/list-name", s.getListName)
 	mux.HandleFunc("PUT /api/list-name", s.setListName)

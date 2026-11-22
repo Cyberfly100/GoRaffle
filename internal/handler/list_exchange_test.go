@@ -227,31 +227,16 @@ func TestListRoundTripJSON(t *testing.T) {
 	}
 }
 
-func TestListRoundTripCSV(t *testing.T) {
-	ts := newTestServer(t)
-	seedList(t, ts, richList.Name, richList.Entries)
-
-	first, _ := export(t, ts, "csv")
-	clearList(t, ts)
-	mustImport(t, ts, "text/csv", first)
-	assertList(t, readList(t, ts), richList)
-
-	second, _ := export(t, ts, "csv")
-	if !bytes.Equal(first, second) {
-		t.Errorf("re-export differs\nfirst:  %q\nsecond: %q", first, second)
-	}
-}
-
 func TestListRoundTripMultipartUpload(t *testing.T) {
 	ts := newTestServer(t)
 	seedList(t, ts, richList.Name, richList.Entries)
 
-	for _, format := range []string{"json", "csv"} {
-		exported, _ := export(t, ts, format)
-		clearList(t, ts)
-		uploadFile(t, ts, "list."+format, exported)
-		assertList(t, readList(t, ts), richList)
-	}
+	// The dialog uploads without a content-type hint, so the format is
+	// sniffed from the bytes.
+	exported, _ := export(t, ts, "json")
+	clearList(t, ts)
+	uploadFile(t, ts, "list.json", exported)
+	assertList(t, readList(t, ts), richList)
 }
 
 // uploadFile posts a file through the import dialog's multipart form.
@@ -270,11 +255,42 @@ func uploadFile(t *testing.T, ts *httptest.Server, filename string, content []by
 func TestExportFileNameFollowsListName(t *testing.T) {
 	ts := newTestServer(t)
 	putJSON(t, ts, "/api/list-name", `{"name":"Team Lunch"}`)
-	for format, want := range map[string]string{"json": `filename="Team_Lunch.json"`, "csv": `filename="Team_Lunch.csv"`} {
-		_, disposition := export(t, ts, format)
-		if !strings.Contains(disposition, want) {
-			t.Errorf("export %s Content-Disposition = %q, want %s", format, disposition, want)
+	_, disposition := export(t, ts, "json")
+	if !strings.Contains(disposition, `filename="Team_Lunch.json"`) {
+		t.Errorf("export Content-Disposition = %q, want filename=\"Team_Lunch.json\"", disposition)
+	}
+}
+
+// The List exports as one JSON List file. The CSV List export and the
+// separate History export are gone: requests for them fail, and the
+// interface offers exactly one export.
+func TestRemovedExportsAreGone(t *testing.T) {
+	ts := newTestServer(t)
+
+	res := doReq(t, ts, "GET", "/api/export?format=csv", nil)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Errorf("csv list export = %d, want 400", res.StatusCode)
+	}
+	for _, format := range []string{"csv", "json"} {
+		res := doReq(t, ts, "GET", "/api/export/history?format="+format, nil)
+		res.Body.Close()
+		if res.StatusCode != http.StatusNotFound {
+			t.Errorf("history export %s = %d, want 404", format, res.StatusCode)
 		}
+	}
+
+	page := bodyOf(t, ts, "/")
+	exports := strings.Count(string(page), "data-export-format")
+	if exports != 1 {
+		t.Errorf("page offers %d exports, want exactly one (the List file):\n%s", exports, page)
+	}
+	if !strings.Contains(string(page), ">List file<") {
+		t.Errorf("page does not offer the List file:\n%s", page)
+	}
+	history := bodyOf(t, ts, "/partials/history")
+	if strings.Contains(string(history), "/api/export") {
+		t.Errorf("history partial still offers an export:\n%s", history)
 	}
 }
 
