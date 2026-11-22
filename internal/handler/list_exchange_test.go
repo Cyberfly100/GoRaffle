@@ -209,3 +209,142 @@ func TestExportFileNameFollowsListName(t *testing.T) {
 		}
 	}
 }
+
+// An import that fails in the database partway through changes nothing: not
+// the Entries before the failing one, and not the List name.
+func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
+	ts := newTestServer(t)
+	before := listSnapshot{
+		Name:    "Keep Me",
+		Entries: []listEntry{{Name: "Existing", PickCount: 2, Excluded: false, Tags: []string{"Old"}}},
+	}
+	seedList(t, ts, before.Name, before.Entries)
+
+	// The last Entry's Pick count overflows the database column, so the
+	// import fails after the List name and the earlier Entries were written.
+	bad := `{"list_name":"Renamed","entries":[
+		{"name":"Existing","pick_count":9,"tags":["New"]},
+		{"name":"Fresh"},
+		{"name":"Overflow","pick_count":3000000000}
+	]}`
+	if status, out := importRaw(t, ts, "application/json", []byte(bad)); status < 400 {
+		t.Fatalf("failing import = %d (%s), want an error", status, out)
+	}
+	assertList(t, readList(t, ts), before)
+}
+
+func TestImportWithoutListNameKeepsCurrentName(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+	}{
+		"bare JSON names":          {"application/json", `["Ann","Ben"]`},
+		"JSON object without name": {"application/json", `{"entries":[{"name":"Ann"},{"name":"Ben"}]}`},
+		"CSV without name row":     {"text/csv", "name,pick_count,excluded,tags\nAnn,0,false,\nBen,0,false,\n"},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			putJSON(t, ts, "/api/list-name", `{"name":"Our List"}`)
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), listSnapshot{
+				Name: "Our List",
+				Entries: []listEntry{
+					{Name: "Ann", Tags: []string{}},
+					{Name: "Ben", Tags: []string{}},
+				},
+			})
+		})
+	}
+}
+
+func TestImportSupportedShapes(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		want        listSnapshot
+	}{
+		"legacy contestants key": {
+			"application/json",
+			`{"list_name":"Old Backup","contestants":[{"name":"Zed","pick_count":4,"excluded":true,"tags":["Alumni"]}]}`,
+			listSnapshot{Name: "Old Backup", Entries: []listEntry{{Name: "Zed", PickCount: 4, Excluded: true, Tags: []string{"Alumni"}}}},
+		},
+		"bare JSON names, sniffed": {
+			"",
+			`  ["Yan", " Xia "]`,
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Xia", Tags: []string{}}, {Name: "Yan", Tags: []string{}}}},
+		},
+		"JSON array of entry objects": {
+			"application/json",
+			`[{"name":"Wes","pick_count":1}]`,
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Wes", PickCount: 1, Tags: []string{}}}},
+		},
+		"CSV with name row, sniffed": {
+			"",
+			"list_name,Sheet\nname,pick_count,excluded,tags\nVic,2,true,A|B\n",
+			listSnapshot{Name: "Sheet", Entries: []listEntry{{Name: "Vic", PickCount: 2, Excluded: true, Tags: []string{"A", "B"}}}},
+		},
+		"hand-made CSV of names only": {
+			"text/csv",
+			"Uma\nTed\n",
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Ted", Tags: []string{}}, {Name: "Uma", Tags: []string{}}}},
+		},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			clearList(t, ts)
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), c.want)
+		})
+	}
+}
+
+// Merging by name only overwrites the fields the file supplies.
+func TestImportMergesOnlySuppliedFields(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Merge", []listEntry{
+		{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
+		{Name: "Ben", PickCount: 1, Excluded: false, Tags: []string{"Old"}},
+	})
+	mustImport(t, ts, "application/json", []byte(`["Ann"]`))
+	mustImport(t, ts, "application/json", []byte(`{"entries":[{"name":"ben","excluded":true,"tags":["New"]},{"name":"Cy"}]}`))
+	assertList(t, readList(t, ts), listSnapshot{
+		Name: "Merge",
+		Entries: []listEntry{
+			{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
+			{Name: "Ben", PickCount: 1, Excluded: true, Tags: []string{"New"}},
+			{Name: "Cy", Tags: []string{}},
+		},
+	})
+}
+
+func TestImportRejectsEmptyAndMalformedFiles(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		wantError   string
+	}{
+		"empty body":            {"", "", "empty"},
+		"whitespace only":       {"text/csv", " \n\t\n", "empty"},
+		"malformed JSON":        {"application/json", `{"entries":[{"name":`, "invalid JSON"},
+		"malformed CSV":         {"text/csv", "name\n\"unterminated\n", "invalid CSV"},
+		"CSV header only":       {"text/csv", "list_name,X\nname,pick_count,excluded,tags\n", "no entries"},
+		"JSON object, no entry": {"application/json", `{"list_name":"X"}`, "no entries"},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			before := listSnapshot{Name: "Untouched", Entries: []listEntry{{Name: "Ann", PickCount: 1, Tags: []string{}}}}
+			seedList(t, ts, before.Name, before.Entries)
+			status, out := importRaw(t, ts, c.contentType, []byte(c.body))
+			if status != http.StatusBadRequest {
+				t.Errorf("import = %d (%s), want 400", status, out)
+			}
+			if !strings.Contains(string(out), c.wantError) {
+				t.Errorf("import error = %s, want it to mention %q", out, c.wantError)
+			}
+			assertList(t, readList(t, ts), before)
+		})
+	}
+}
