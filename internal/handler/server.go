@@ -87,11 +87,15 @@ func (s *Server) Routes() http.Handler {
 	return withLogging(mux)
 }
 
-// broadcast marshals a change event and fans it out over the hub.
-func (s *Server) broadcast(eventType string, data any) {
-	msg, err := marshalEvent(eventType, data)
+// changed broadcasts the one "changed" event naming the stale regions.
+func (s *Server) changed(regions ...Region) {
+	s.broadcastChanged(Changed{Regions: regions})
+}
+
+func (s *Server) broadcastChanged(c Changed) {
+	msg, err := marshalEvent(EventChanged, c)
 	if err != nil {
-		slog.Error("marshal broadcast event", "type", eventType, "err", err)
+		slog.Error("marshal changed event", "err", err)
 		return
 	}
 	s.hub.Broadcast(msg)

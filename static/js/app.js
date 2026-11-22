@@ -637,8 +637,7 @@ function bindWS() {
     syncDrawBtn();
   });
   ws.on("winner", (data) => reel.land(data && data.winner && data.winner.name));
-  ws.on("undo", () => refreshPartials());
-  ws.on("entries", () => refreshPartials());
+  ws.on("changed", () => refreshPartials());
 }
 
 /* ---------- DB health ---------- */

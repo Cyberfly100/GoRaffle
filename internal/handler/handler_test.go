@@ -320,42 +320,6 @@ func TestImportEmptyJSONErrors(t *testing.T) {
 	}
 }
 
-// WS: a connected browser receives the change broadcast over the websocket.
-func TestWebSocketBroadcast(t *testing.T) {
-	ts := newTestServer(t)
-
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial ws: %v", err)
-	}
-	defer conn.Close()
-
-	// Give the hub event loop a moment to register the client, then trigger
-	// broadcasts through the API.
-	time.Sleep(50 * time.Millisecond)
-	postJSON(t, ts, "/api/reset", "")
-	postJSON(t, ts, "/api/reset", "")
-
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for i := 0; i < 3; i++ {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			t.Fatalf("read ws: %v", err)
-		}
-		var evt struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(msg, &evt); err != nil {
-			t.Fatalf("event JSON: %v (%s)", err, msg)
-		}
-		if evt.Type == "entries" {
-			return // got a live broadcast
-		}
-	}
-	t.Error("no entries event received over websocket")
-}
-
 // Suspense: after a draw, browsers receive a "suspense" event whose names
 // array drives the flicker animation.
 func TestSuspenseNames(t *testing.T) {

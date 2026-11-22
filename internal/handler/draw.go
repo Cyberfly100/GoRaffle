@@ -83,13 +83,7 @@ func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := "Removed last entry: " + last.EntryName
-	if msg, err := marshalEvent(EventUndo, map[string]any{
-		"info": info,
-		"name": last.EntryName,
-		"num":  last.PickNumber,
-	}); err == nil {
-		s.hub.Broadcast(msg)
-	}
+	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionResult}, Info: info})
 
 	writeJSON(w, http.StatusOK, map[string]string{"info": info})
 }
@@ -99,9 +93,7 @@ func (s *Server) resetScores(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "reset scores")
 		return
 	}
-	if msg, err := marshalEvent(EventEntries, map[string]bool{"reset": true}); err == nil {
-		s.hub.Broadcast(msg)
-	}
+	s.changed(RegionTable, RegionHistory, RegionResult)
 	writeJSON(w, http.StatusOK, map[string]bool{"reset": true})
 }
 

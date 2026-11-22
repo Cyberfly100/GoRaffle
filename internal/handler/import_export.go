@@ -126,7 +126,7 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "import list")
 		return
 	}
-	s.broadcast(EventEntries, map[string]int{"added": added, "updated": updated})
+	s.changed(RegionTable, RegionFilter, RegionTagPopover, RegionListName)
 	writeJSON(w, http.StatusCreated, map[string]any{"added": added, "updated": updated, "list_name": list.Name})
 }
 
@@ -181,5 +181,6 @@ func (s *Server) setListName(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "set list name")
 		return
 	}
+	s.changed(RegionListName)
 	writeJSON(w, http.StatusOK, map[string]string{"name": name})
 }
