@@ -130,3 +130,21 @@ test("a refresh of the last Pick that lands while the Reel is running leaves it 
   expect(await landing).toBe(winner);
   await expect(page.locator("#result .result-sub")).toHaveText("pick #1", { timeout: 10_000 });
 });
+
+test("the vertical and horizontal Reels pass names at about the same Reel speed", async ({ page, request }) => {
+  await seedEntries(request, NAMES);
+  const speeds = {};
+  for (const orientation of ["horizontal", "vertical"]) {
+    await page.goto("/");
+    await page.evaluate((v) => localStorage.setItem("raffle-reel-mode", v), orientation === "vertical" ? "v" : "h");
+    await page.reload();
+    const landing = h.nextLanding(page);
+    const measured = h.cruisingNamesPerSecond(page);
+    await h.clickDraw(page);
+    speeds[orientation] = await measured;
+    await landing;
+  }
+  const ratio = speeds.vertical / speeds.horizontal;
+  expect(ratio, `names/s: ${JSON.stringify(speeds)}`).toBeGreaterThan(1 / 1.5);
+  expect(ratio, `names/s: ${JSON.stringify(speeds)}`).toBeLessThan(1.5);
+});

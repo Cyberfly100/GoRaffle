@@ -315,7 +315,55 @@ async function tableMarking(page) {
   });
 }
 
+// Names per second passing the Reel window while it cruises (the Reel speed
+// the audience sees). Samples the belt frame by frame between `fromMs` and
+// `toMs` after it starts moving; the cruise is a looping animation, so frames
+// where the belt jumps back to the loop start are left out. Call right after
+// the Draw.
+async function cruisingNamesPerSecond(page, { fromMs = 1000, toMs = 1700 } = {}) {
+  return page.evaluate(
+    ({ fromMs, toMs }) =>
+      new Promise((resolve, reject) => {
+        const track = () => document.querySelector("#result .reel-track");
+        const vertical = () => document.body.classList.contains("reel-vertical");
+        const offset = () => {
+          const m = new DOMMatrix(getComputedStyle(track()).transform);
+          return vertical() ? m.m42 : m.m41;
+        };
+        const cellSize = () =>
+          parseFloat(getComputedStyle(document.querySelector("#result .reel")).getPropertyValue(vertical() ? "--cell-h" : "--cell-w"));
+        let start = null;
+        let prev = null;
+        let px = 0;
+        let ms = 0;
+        const giveUp = performance.now() + 10_000;
+        const step = () => {
+          const now = performance.now();
+          if (now > giveUp) return reject(new Error("Reel never cruised"));
+          if (start === null) {
+            if (track() && offset() !== 0) start = now;
+          } else if (now - start >= fromMs) {
+            const cur = { at: now, offset: offset() };
+            if (prev) {
+              const moved = prev.offset - cur.offset; // the belt moves towards negative offsets
+              if (moved > 0) {
+                px += moved;
+                ms += cur.at - prev.at;
+              }
+            }
+            prev = cur;
+            if (now - start >= toMs) return resolve(px / cellSize() / (ms / 1000));
+          }
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+    { fromMs, toMs }
+  );
+}
+
 module.exports = {
+  cruisingNamesPerSecond,
   chooseFilterTag,
   tableMarking,
   waitForLiveUpdates,

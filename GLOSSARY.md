@@ -89,3 +89,7 @@ _Avoid_: Drama, animation
 **Reel**:
 The slot-machine strip that names scroll across during the Suspense and that stops on the winner. It runs horizontally or vertically.
 _Avoid_: Wheel, spinner, drum
+
+**Reel speed**:
+How many names pass the Reel's window per second. It is the same whichever way the Reel runs, unless the names are so wide that the Reel would move too fast to read.
+_Avoid_: Spin speed, velocity (for the pixel rate the Reel moves at)

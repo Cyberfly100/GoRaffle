@@ -1,7 +1,7 @@
 // Pure tests for the Reel's landing planner. Run: node --test 'js-tests/*.test.js'
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planLanding, HORIZONTAL, VERTICAL } from "../static/js/reel-plan.js";
+import { planLanding, cruiseSpeed, HORIZONTAL, VERTICAL } from "../static/js/reel-plan.js";
 
 const CYCLE = ["Ada", "Grace", "Linus", "Margaret", "Ken"];
 
@@ -106,4 +106,18 @@ test("horizontal and vertical give the same plan for the same geometry", () => {
     const g = geometry({ ...c, rendered: 30 });
     assert.deepEqual(planLanding({ ...g, axis: VERTICAL }), planLanding({ ...g, axis: HORIZONTAL }));
   }
+});
+
+// Reel speed: 16 names pass the window per second in either orientation,
+// but the belt never moves faster than 4.35 px/ms (wide names stay readable).
+test("a vertical Reel (48 px cells) cruises at 16 names per second", () => {
+  assert.ok(Math.abs(cruiseSpeed(48) - 0.768) < 1e-9);
+});
+
+test("a horizontal Reel with short names (128 px cells) cruises at 16 names per second", () => {
+  assert.ok(Math.abs(cruiseSpeed(128) - 2.048) < 1e-9);
+});
+
+test("a horizontal Reel with very long names is capped at 4.35 px/ms", () => {
+  assert.equal(cruiseSpeed(400), 4.35);
 });
