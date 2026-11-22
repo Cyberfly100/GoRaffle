@@ -22,6 +22,9 @@ type pageData struct {
 	LastPick *model.Pick
 	MustHave []string
 	AnyOf    []string
+	// ListName is rendered into the List name field and the export links so
+	// the page arrives with the current name (no correction after load).
+	ListName string
 }
 
 // tagPalette is a muted pastel set; index = hash(name) % len.
@@ -181,7 +184,12 @@ func (s *Server) buildPageData(ctx context.Context) (pageData, error) {
 	if err != nil {
 		return pageData{}, err
 	}
+	listName, err := s.store.GetListName(ctx)
+	if err != nil {
+		return pageData{}, err
+	}
 	return pageData{
+		ListName: listName,
 		Entries:  cs,
 		Tags:     tags,
 		History:  picks,

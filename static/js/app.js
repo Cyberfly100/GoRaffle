@@ -1389,21 +1389,9 @@
   }
 
   /* ---------- List Name ---------- */
+  // The server renders the current List name into the field and the export
+  // links, so nothing needs correcting after load.
   let listNameDebounce = null;
-
-  async function loadListName() {
-    try {
-      const resp = await fetch("/api/list-name");
-      const data = await resp.json();
-      const input = $("#list-name");
-      if (input && data.name) {
-        input.value = data.name;
-        updateExportLinks(data.name);
-      }
-    } catch {
-      // Ignore errors, keep default
-    }
-  }
 
   function updateExportLinks(name) {
     const safeName = name.trim() || "raffle";
@@ -1455,7 +1443,6 @@
     bindReelToggle();
     dressVerticalReel();
     bindListName();
-    loadListName();
     // #new-name lives inside the swapped table partial, so its Enter
     // handling is delegated (element-bound listeners are lost on swap).
     document.addEventListener("keydown", (e) => {
