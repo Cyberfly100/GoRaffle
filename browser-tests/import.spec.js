@@ -60,6 +60,30 @@ test.describe("import warning", () => {
     expect(await h.entryNamesInTable(page)).toEqual([]);
   });
 
+  test("the unused-Tags checkbox starts unticked, and ticking it sends the remove-unused-Tags option", async ({ page, request }) => {
+    // The current List carries a Tag the imported Entries won't use.
+    const seeded = await request.post("/api/import", { data: { entries: [{ name: "Ann", tags: ["old"] }] } });
+    expect(seeded.ok()).toBeTruthy();
+    await h.showEntriesOnLoad(page);
+    await page.goto("/");
+    const fetched = h.recordRegionFetches(page);
+    await h.openImportExport(page);
+
+    await page.locator("#import-file").setInputFiles(h.jsonFile("people.json", { entries: [{ name: "Ben", tags: ["keep"] }] }));
+    await expect(page.locator("#import-confirm")).toBeVisible();
+    await expect(page.locator("#remove-unused-tags")).not.toBeChecked();
+    await expect(page.locator("label[for='remove-unused-tags']")).toContainText("Also remove Tags that no imported Entry uses");
+
+    await page.locator("#remove-unused-tags").check();
+    await page.locator("#import-confirm-btn").click();
+
+    await expect(h.toast(page)).toHaveText("Imported: 1 entry, 0 picks.");
+    // The Tag filter bar re-renders from the Import's change event.
+    await expect.poll(() => fetched().filter((p) => p === "/partials/filter").length).toBeGreaterThan(0);
+    await h.closeImportExport(page);
+    await expect.poll(() => h.availableTags(page)).toEqual(["keep"]);
+  });
+
   test("after an Import a second connected browser shows the new List and History", async ({ page, browser }, testInfo) => {
     await h.showEntriesOnLoad(page);
     await page.goto("/");

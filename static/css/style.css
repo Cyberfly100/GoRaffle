@@ -1412,6 +1412,14 @@ dialog::backdrop {
   margin: 0;
 }
 
+.import-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
 .ie-close {
   position: absolute;
   top: 0.5rem;

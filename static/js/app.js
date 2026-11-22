@@ -516,6 +516,10 @@ function openImportConfirm(file) {
   if (!dialog) return;
   const nameEl = $("#import-confirm-file");
   if (nameEl) nameEl.textContent = file.name;
+  // The checkbox starts unticked for every file: a mistaken Import keeps
+  // the old Tags and can be corrected by importing again.
+  const tags = $("#remove-unused-tags");
+  if (tags) tags.checked = false;
   // Export current List first must offer the List as the host sees it, so
   // its link is rewritten from the List name field like every export link.
   updateExportLinks($("#list-name")?.value || "");
@@ -583,7 +587,7 @@ function bindImportConfirm() {
   if (!dialog) return;
   document.addEventListener("click", (e) => {
     if (e.target.closest("#import-confirm-btn")) {
-      doImport();
+      doImport({ removeUnusedTags: $("#remove-unused-tags")?.checked });
       return;
     }
     if (e.target.closest("#import-cancel-btn") || e.target === dialog) {

@@ -235,6 +235,17 @@ async function otherBrowserChangesEntry(request, name, change) {
   if (!resp.ok()) throw new Error(`change ${name}: ${resp.status()}`);
 }
 
+// The Tags the host can filter by: opens the Tag picker the way the host
+// does and reads the chips it offers, closing it again.
+async function availableTags(page) {
+  const accordion = page.locator("#filter-accordion");
+  if (!(await accordion.evaluate((d) => d.open))) await accordion.locator("summary").click();
+  await page.locator('#filter-bar .tag-add[data-zone="must_have"]').click();
+  const names = await page.locator('#filter-picker [data-action="pick-filter-tag"]').allTextContents();
+  await page.locator("#filter-picker-close").click();
+  return names;
+}
+
 const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
 // The table row of the Entry the server knows by this name.
@@ -395,6 +406,7 @@ module.exports = {
   jsonFile,
   csvFile,
   toast,
+  availableTags,
   entryNamesInTable,
   exportLinkNames,
   renameList,
