@@ -533,7 +533,9 @@ async function doImport() {
     toast(data.error || "Import failed.");
     return;
   }
-  toast(`Imported: ${data.added} added, ${data.updated} updated.`);
+  const entries = `${data.entries} ${data.entries === 1 ? "entry" : "entries"}`;
+  const picks = `${data.picks} ${data.picks === 1 ? "pick" : "picks"}`;
+  toast(`Imported: ${entries}, ${picks}.`);
   if (data.list_name) {
     const input = $("#list-name");
     if (input) {

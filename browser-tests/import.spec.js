@@ -9,7 +9,7 @@ test.describe("import", () => {
 
     await h.importFile(page, h.jsonFile("people.json", { entries: [{ name: "Ada" }, { name: "Grace" }] }));
 
-    await expect(h.toast(page)).toHaveText("Imported: 2 added, 0 updated.");
+    await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
     await expect(page.locator("#file-chosen")).toHaveText("No file chosen");
     await expect(page.locator("#import-btn")).toBeDisabled();
     await expect(page.locator("#import-file")).toHaveValue("");
@@ -24,7 +24,7 @@ test.describe("import", () => {
 
     await h.importFile(page, h.csvFile("people.csv", "name,pick_count,excluded,tags\nAda,0,false,\nGrace,1,false,team\n"));
 
-    await expect(h.toast(page)).toHaveText("Imported: 2 added, 0 updated.");
+    await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
     await expect(page.locator("#file-chosen")).toHaveText("No file chosen");
     await expect(page.locator("#import-btn")).toBeDisabled();
     await h.closeImportExport(page);
@@ -39,7 +39,7 @@ test.describe("import", () => {
 
     await h.importFile(page, h.jsonFile("people.json", ["Ada", "Grace"]));
 
-    await expect(h.toast(page)).toHaveText("Imported: 2 added, 0 updated.");
+    await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
     await h.closeImportExport(page);
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
   });
@@ -62,7 +62,7 @@ test.describe("import with a List name", () => {
 
     await h.importFile(page, h.jsonFile("club.json", { list_name: "Chess Club", entries: [{ name: "Ada" }] }));
 
-    await expect(h.toast(page)).toHaveText("Imported: 1 added, 0 updated.");
+    await expect(h.toast(page)).toHaveText("Imported: 1 entry, 0 picks.");
     await expect(page.locator("#list-name")).toHaveValue("Chess Club");
     await expect.poll(() => h.exportLinkNames(page)).toEqual(["Chess Club"]);
   });
