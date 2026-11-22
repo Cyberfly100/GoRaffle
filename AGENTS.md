@@ -21,6 +21,13 @@ require a rebuild — including the docker image — to be visible).
   no bundler. `app.js` is page wiring; `reel.js` is the Reel (its interface is
   documented at the top of the file); `reel-plan.js` is its pure landing
   planner; `sound.js`, `confetti.js`, `ws.js` are what they say.
+- Page regions refresh through `regions.js` (interface at the top of the file).
+  Each region is declared once in `app.js` (`regions.define(...)`) with what it
+  keeps across a refresh; the server's `changed` event names stale regions
+  (Go constants `Region*` in `internal/handler/helpers.go`, same names).
+- `collapsible.js` is the one show/hide toggle (History, Entries); its state is
+  the class `no-<name>` on `<html>`, set before first paint by an inline script
+  in `layout.html`.
 - Only `reel.js` reads or writes Reel state, Reel classes or Reel CSS variables.
   Ask `reel.busy()` instead of checking phases; react to `reel.onIdle`.
 - Pure modules get `node --test` tests in `js-tests/` (outside `static/`, so

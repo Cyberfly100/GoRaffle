@@ -7,6 +7,14 @@
   <title>Raffle</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/css/style.css">
+  <script>
+    // Collapsed sections, applied before the first paint (see collapsible.js).
+    for (const name of ["history", "entries"]) {
+      let shown = false;
+      try { shown = localStorage.getItem("raffle-" + name + "-visible") === "1"; } catch {}
+      if (!shown) document.documentElement.classList.add("no-" + name);
+    }
+  </script>
 </head>
 <body class="page">
   <header class="header">

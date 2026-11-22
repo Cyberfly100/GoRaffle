@@ -149,7 +149,7 @@ func TestIndexAndEmptyState(t *testing.T) {
 	}
 	// The browser code is native ES modules: browsers refuse a module that is
 	// not served with a JavaScript MIME type.
-	for _, path := range []string{"/static/js/app.js", "/static/js/ws.js", "/static/js/reel.js", "/static/js/reel-plan.js", "/static/js/sound.js", "/static/js/confetti.js"} {
+	for _, path := range []string{"/static/js/app.js", "/static/js/ws.js", "/static/js/reel.js", "/static/js/reel-plan.js", "/static/js/sound.js", "/static/js/confetti.js", "/static/js/regions.js", "/static/js/collapsible.js"} {
 		res, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)
