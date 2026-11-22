@@ -13,6 +13,7 @@ type Hub struct {
 	mu         sync.RWMutex
 	clients    map[*Client]struct{}
 	broadcast  chan []byte
+	direct     chan directMsg
 	register   chan *Client
 	unregister chan *Client
 }
@@ -21,6 +22,7 @@ func NewHub() *Hub {
 	return &Hub{
 		clients:    make(map[*Client]struct{}),
 		broadcast:  make(chan []byte, 256),
+		direct:     make(chan directMsg, 64),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
 	}
@@ -37,6 +39,16 @@ func (h *Hub) Run() {
 			if _, ok := h.clients[c]; ok {
 				delete(h.clients, c)
 				close(c.send)
+			}
+		case d := <-h.direct:
+			if _, ok := h.clients[d.client]; ok {
+				select {
+				case d.client.send <- d.msg:
+				default:
+					slog.Debug("dropping slow client")
+					delete(h.clients, d.client)
+					close(d.client.send)
+				}
 			}
 		case msg := <-h.broadcast:
 			h.mu.RLock()
@@ -60,6 +72,18 @@ func (h *Hub) Broadcast(msg []byte) {
 	h.broadcast <- msg
 }
 
+// directMsg is a message for one client.
+type directMsg struct {
+	client *Client
+	msg    []byte
+}
+
+// SendTo queues a message for one registered client alone. It goes through
+// the hub loop, so it is dropped if the client is already gone.
+func (h *Hub) SendTo(c *Client, msg []byte) {
+	h.direct <- directMsg{client: c, msg: msg}
+}
+
 // Register queues a client for the hub event loop.
 func (h *Hub) Register(c *Client) {
 	h.register <- c
@@ -79,11 +103,6 @@ type Client struct {
 
 func NewClient(hub *Hub, conn *websocket.Conn) *Client {
 	return &Client{hub: hub, conn: conn, send: make(chan []byte, 64)}
-}
-
-// Send queues a message for this client alone. Call it before Register.
-func (c *Client) Send(msg []byte) {
-	c.send <- msg
 }
 
 const (

@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -538,6 +539,51 @@ func TestRevealReplaysAfterDeletingAnotherEntry(t *testing.T) {
 	got := readEvents(t, dialWS(t, ts), 300*time.Millisecond)
 	if len(got) != 1 || !strings.Contains(string(got[0]), `"type":"reveal"`) {
 		t.Errorf("connecting after deleting a non-winner got %s, want the Reveal", got)
+	}
+}
+
+// A browser connecting while a Draw happens sees its Reveal exactly once:
+// either replayed on connect or broadcast after, never missed.
+func TestConnectDuringDrawNeverMissesReveal(t *testing.T) {
+	ts := newTestServer(t)
+	seedVIP(t, ts)
+	for round := 0; round < 20; round++ {
+		const clients = 8
+		conns := make(chan *websocket.Conn, clients)
+		var wg sync.WaitGroup
+		for i := 0; i < clients; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", nil)
+				if err != nil {
+					t.Errorf("dial ws: %v", err)
+					return
+				}
+				conns <- conn
+			}()
+		}
+		var drawn revealEvent
+		if err := json.Unmarshal(postJSON(t, ts, "/api/draw", `{}`), &drawn.Data); err != nil {
+			t.Fatalf("draw response: %v", err)
+		}
+		wg.Wait()
+		close(conns)
+		for conn := range conns {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				for _, msg := range readEvents(t, conn, 150*time.Millisecond) {
+					var evt revealEvent
+					if json.Unmarshal(msg, &evt) == nil && evt.Type == "reveal" && evt.Data.PickID == drawn.Data.PickID {
+						return
+					}
+				}
+				t.Errorf("round %d: a browser connecting during the Draw missed its Reveal", round)
+			}()
+		}
+		wg.Wait()
 	}
 }
 
