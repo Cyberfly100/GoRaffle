@@ -214,6 +214,74 @@ func TestUndo(t *testing.T) {
 	}
 }
 
+// Undo never pushes a Pick count below zero: a winner whose Pick count was
+// hand-edited to 0 keeps 0, the Pick is still removed, and the History stays
+// undoable Pick by Pick.
+func TestUndoFloorsPickCountAtZero(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	ids := addEntries(t, store, "x")
+	for i := 0; i < 2; i++ {
+		if _, err := engine.Draw(ctx, model.TagFilter{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The winner's Pick count was hand-edited down to 0, below its History.
+	setPickCount(t, store, ids["x"], 0)
+
+	if _, err := store.UndoLastPick(ctx); err != nil {
+		t.Fatalf("undo: %v", err)
+	}
+	c, _ := store.GetEntry(ctx, ids["x"])
+	if c.PickCount != 0 {
+		t.Errorf("pick_count after undo at zero = %d, want 0 (never negative)", c.PickCount)
+	}
+	picks, _ := store.ListHistory(ctx)
+	if len(picks) != 1 {
+		t.Fatalf("history after undo = %d Picks, want the earlier one", len(picks))
+	}
+
+	// The History stays undoable: the next Undo reaches the Pick before it.
+	undone, err := store.UndoLastPick(ctx)
+	if err != nil {
+		t.Fatalf("second undo: %v", err)
+	}
+	if undone.PickNumber != 1 {
+		t.Errorf("second undo removed Pick #%d, want #1", undone.PickNumber)
+	}
+	c, _ = store.GetEntry(ctx, ids["x"])
+	if c.PickCount != 0 {
+		t.Errorf("pick_count after second undo = %d, want 0", c.PickCount)
+	}
+	picks, _ = store.ListHistory(ctx)
+	if len(picks) != 0 {
+		t.Errorf("history after second undo = %d Picks, want 0", len(picks))
+	}
+	if _, err := store.UndoLastPick(ctx); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("undo past the beginning = %v, want ErrNotFound", err)
+	}
+}
+
+// With a Pick count above zero, Undo still decrements by exactly one: the
+// floor only stops it from going below zero.
+func TestUndoDecrementsCountAboveZero(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	ids := addEntries(t, store, "x")
+	if _, err := engine.Draw(ctx, model.TagFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	// A hand-set count well above the History still just loses one.
+	setPickCount(t, store, ids["x"], 5)
+	if _, err := store.UndoLastPick(ctx); err != nil {
+		t.Fatalf("undo: %v", err)
+	}
+	c, _ := store.GetEntry(ctx, ids["x"])
+	if c.PickCount != 4 {
+		t.Errorf("pick_count after undo = %d, want 4", c.PickCount)
+	}
+}
+
 // addEntries adds named Entries and returns their ids by name.
 func addEntries(t *testing.T, store *db.Store, names ...string) map[string]int {
 	t.Helper()

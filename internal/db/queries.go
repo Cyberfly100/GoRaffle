@@ -280,7 +280,8 @@ func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 }
 
 // UndoLastPick atomically removes the last Pick and decrements the winner's
-// Pick count, serialized against Draws and Reset. It returns the Pick it
+// Pick count, floored at zero so a hand-edited or imported count can never go
+// negative. It is serialized against Draws and Reset. It returns the Pick it
 // removed, read inside the same transaction, or ErrNotFound.
 func (s *Store) UndoLastPick(ctx context.Context) (model.Pick, error) {
 	tx, err := s.beginPicksTx(ctx)
@@ -307,7 +308,7 @@ func (s *Store) UndoLastPick(ctx context.Context) (model.Pick, error) {
 		return model.Pick{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE entries SET pick_count = pick_count - 1, updated_at = NOW() WHERE id = $1`,
+		`UPDATE entries SET pick_count = GREATEST(pick_count - 1, 0), updated_at = NOW() WHERE id = $1`,
 		p.EntryID); err != nil {
 		return model.Pick{}, err
 	}
