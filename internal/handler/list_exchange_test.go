@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -123,7 +124,18 @@ func export(t *testing.T, ts *httptest.Server, format string) ([]byte, string) {
 // importRaw posts content directly to the import endpoint.
 func importRaw(t *testing.T, ts *httptest.Server, contentType string, body []byte) (int, []byte) {
 	t.Helper()
-	req, err := http.NewRequest("POST", ts.URL+"/api/import", bytes.NewReader(body))
+	return importRawOpts(t, ts, contentType, body, "")
+}
+
+// importRawOpts posts content to the import endpoint with option flags in
+// the query string.
+func importRawOpts(t *testing.T, ts *httptest.Server, contentType string, body []byte, query string) (int, []byte) {
+	t.Helper()
+	url := ts.URL + "/api/import"
+	if query != "" {
+		url += "?" + query
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +328,8 @@ func TestRemovedExportsAreGone(t *testing.T) {
 }
 
 // An import that fails in the database partway through changes nothing: not
-// the Entries before the failing one, and not the List name.
+// the Entries before the failing one, not the List name, and not the History
+// the Import was about to replace.
 func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
 	ts := newTestServer(t)
 	before := listSnapshot{
@@ -324,6 +337,8 @@ func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
 		Entries: []listEntry{{Name: "Existing", PickCount: 2, Excluded: false, Tags: []string{"Old"}}},
 	}
 	seedList(t, ts, before.Name, before.Entries)
+	postJSON(t, ts, "/api/draw", `{}`) // Existing wins: the History is non-empty
+	before.Entries[0].PickCount = 3    // the Draw added one
 
 	// The last Entry's Pick count overflows the database column, so the
 	// import fails after the List name and the earlier Entries were written.
@@ -336,6 +351,9 @@ func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
 		t.Fatalf("failing import = %d (%s), want an error", status, out)
 	}
 	assertList(t, readList(t, ts), before)
+	if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Existing" {
+		t.Errorf("history after failed import = %+v, want the seeded Pick", picks)
+	}
 }
 
 func TestImportSupportedShapes(t *testing.T) {
@@ -565,6 +583,228 @@ func TestImportWithoutListNameResetsToEntries(t *testing.T) {
 				},
 			})
 		})
+	}
+}
+
+// A Pick naming an Entry the file doesn't contain stops the Import: the
+// response is a distinct error listing the missing names and the number of
+// affected Picks, and nothing changes. The same file with the "skip missing
+// Picks" option imports and drops those Picks.
+func TestImportMissingNames(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Untouched", []listEntry{{Name: "Ann", PickCount: 1, Tags: []string{}}})
+	postJSON(t, ts, "/api/draw", `{}`) // Ann wins: the History is non-empty
+	before := readList(t, ts)
+
+	file := `{"list_name":"New","entries":[{"name":"Ben"}],"picks":[
+		{"entry_name":"Ben","pick_number":1,"picked_at":"2026-11-23T10:00:00Z"},
+		{"entry_name":"Ghost","pick_number":2,"picked_at":"2026-11-23T11:00:00Z"},
+		{"entry_name":"ghost","pick_number":3,"picked_at":"2026-11-23T12:00:00Z"}]}`
+
+	status, out := importRaw(t, ts, "application/json", []byte(file))
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("import = %d (%s), want 422", status, out)
+	}
+	var e struct {
+		Error        string   `json:"error"`
+		MissingNames []string `json:"missing_names"`
+		MissingPicks int      `json:"missing_picks"`
+	}
+	if err := json.Unmarshal(out, &e); err != nil {
+		t.Fatalf("error response: %v (%s)", err, out)
+	}
+	if len(e.MissingNames) != 1 || e.MissingNames[0] != "Ghost" {
+		t.Errorf("missing_names = %v, want [Ghost] (deduped case-insensitively)", e.MissingNames)
+	}
+	if e.MissingPicks != 2 {
+		t.Errorf("missing_picks = %d, want 2", e.MissingPicks)
+	}
+	if !strings.Contains(e.Error, "Ghost") || !strings.Contains(e.Error, "2") {
+		t.Errorf("error = %q, want it to name Ghost and its 2 Picks", e.Error)
+	}
+	assertList(t, readList(t, ts), before)
+	if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Ann" {
+		t.Errorf("history after refused import = %+v, want the seeded Pick", picks)
+	}
+
+	// With the option the same file imports without those Picks.
+	status, out = importRawOpts(t, ts, "application/json", []byte(file), "skip_missing_picks=1")
+	if status != http.StatusCreated {
+		t.Fatalf("import with skip_missing_picks = %d (%s), want 201", status, out)
+	}
+	assertList(t, readList(t, ts), listSnapshot{
+		Name:    "New",
+		Entries: []listEntry{{Name: "Ben", PickCount: 1, Tags: []string{}}},
+	})
+	if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Ben" || picks[0].PickNumber != 1 {
+		t.Errorf("history after skipped import = %+v, want Ben's Pick #1", picks)
+	}
+}
+
+// The browser dialog re-sends the file with the option as a form field.
+func TestImportSkipMissingPicksAsFormField(t *testing.T) {
+	ts := newTestServer(t)
+	var buf bytes.Buffer
+	boundary := "goraffle-test-boundary"
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString("Content-Disposition: form-data; name=\"skip_missing_picks\"\r\n\r\n1\r\n")
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString(`Content-Disposition: form-data; name="file"; filename="list.json"` + "\r\n")
+	buf.WriteString("Content-Type: application/octet-stream\r\n\r\n")
+	buf.WriteString(`{"entries":[{"name":"Ann"}],"picks":[{"entry_name":"Ghost","pick_number":1,"picked_at":"2026-11-23T10:00:00Z"}]}`)
+	buf.WriteString("\r\n--" + boundary + "--\r\n")
+	status, out := importRaw(t, ts, "multipart/form-data; boundary="+boundary, buf.Bytes())
+	if status != http.StatusCreated {
+		t.Fatalf("import = %d (%s), want 201", status, out)
+	}
+	assertList(t, readList(t, ts), listSnapshot{
+		Name:    "Entries",
+		Entries: []listEntry{{Name: "Ann", Tags: []string{}}},
+	})
+	if picks := readHistory(t, ts); len(picks) != 0 {
+		t.Errorf("history = %+v, want empty", picks)
+	}
+}
+
+// Picks are sorted by the file's Pick number, ties broken by time, then
+// renumbered 1 to n: gaps, duplicate numbers and ties can't survive. They
+// match Entries by name case-insensitively, and a Pick count supplied by the
+// file wins while an Entry with no count gets the number of its Picks.
+func TestImportRenumbersAndCountsPicks(t *testing.T) {
+	ts := newTestServer(t)
+	clearList(t, ts)
+	// Pick numbers have a gap, a tie (broken by time) and a duplicate
+	// Entry name in different case; Ann's count is supplied, Ben's isn't.
+	file := `{"list_name":"Renum","entries":[{"name":"Ann","pick_count":5},{"name":"Ben"}],"picks":[
+		{"entry_name":"ben","pick_number":5,"picked_at":"2026-11-23T03:00:00Z"},
+		{"entry_name":"ANN","pick_number":2,"picked_at":"2026-11-23T01:00:00Z"},
+		{"entry_name":"ben","pick_number":2,"picked_at":"2026-11-23T02:00:00Z"}]}`
+	mustImport(t, ts, "application/json", []byte(file))
+
+	picks := readHistory(t, ts)
+	want := []struct {
+		name string
+		num  int
+	}{{"Ann", 1}, {"Ben", 2}, {"Ben", 3}}
+	if len(picks) != len(want) {
+		t.Fatalf("history = %+v, want %d Picks", picks, len(want))
+	}
+	for i, p := range picks {
+		if p.EntryName != want[i].name || p.PickNumber != want[i].num {
+			t.Errorf("pick %d = %s #%d, want %s #%d", i, p.EntryName, p.PickNumber, want[i].name, want[i].num)
+		}
+	}
+	assertList(t, readList(t, ts), listSnapshot{
+		Name: "Renum",
+		Entries: []listEntry{
+			{Name: "Ann", PickCount: 5, Tags: []string{}}, // the file's count wins
+			{Name: "Ben", PickCount: 2, Tags: []string{}}, // its Picks in the file
+		},
+	})
+}
+
+// An Entry with no Pick count in the file and no Picks either gets zero.
+func TestImportCountsEntriesWithoutPicks(t *testing.T) {
+	ts := newTestServer(t)
+	mustImport(t, ts, "application/json",
+		[]byte(`{"entries":[{"name":"Ann"},{"name":"Cy","pick_count":0}]}`))
+	assertList(t, readList(t, ts), listSnapshot{
+		Name: "Entries",
+		Entries: []listEntry{
+			{Name: "Ann", Tags: []string{}},
+			{Name: "Cy", Tags: []string{}},
+		},
+	})
+}
+
+// Legacy formats can't carry a History: a CSV (with or without the List
+// name row), a bare JSON list of names and an older JSON export all
+// replace the List with the file's Entries and an empty History.
+func TestLegacyImportsLeaveHistoryEmpty(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		want        listSnapshot
+	}{
+		"older JSON export without picks": {
+			"application/json",
+			`{"list_name":"Old Backup","entries":[{"name":"Ann","pick_count":3,"excluded":false,"tags":["VIP"]}]}`,
+			listSnapshot{Name: "Old Backup", Entries: []listEntry{{Name: "Ann", PickCount: 3, Tags: []string{"VIP"}}}},
+		},
+		"CSV with name row": {
+			"text/csv",
+			"list_name,Sheet\nname,pick_count,excluded,tags\nVic,2,true,A|B\n",
+			listSnapshot{Name: "Sheet", Entries: []listEntry{{Name: "Vic", PickCount: 2, Excluded: true, Tags: []string{"A", "B"}}}},
+		},
+		"bare JSON names": {
+			"application/json",
+			`["Ann","Ben"]`,
+			listSnapshot{Name: "Entries", Entries: []listEntry{
+				{Name: "Ann", Tags: []string{}},
+				{Name: "Ben", Tags: []string{}},
+			}},
+		},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			seedList(t, ts, "Drawn", []listEntry{{Name: "Zed", Tags: []string{}}})
+			postJSON(t, ts, "/api/draw", `{}`) // Zed wins: the History is non-empty
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), c.want)
+			if picks := readHistory(t, ts); len(picks) != 0 {
+				t.Errorf("history after legacy import = %+v, want empty", picks)
+			}
+		})
+	}
+}
+
+// readTagNames returns every Tag the tags endpoint lists, by name.
+func readTagNames(t *testing.T, ts *httptest.Server) []string {
+	t.Helper()
+	var tags []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/tags"), &tags); err != nil {
+		t.Fatalf("tags: %v", err)
+	}
+	names := make([]string, len(tags))
+	for i, tg := range tags {
+		names[i] = tg.Name
+	}
+	return names
+}
+
+// The "remove unused Tags" option is off by default: Tags no imported Entry
+// uses stay available; with the option they are removed.
+func TestImportUnusedTagsOption(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Old", []listEntry{
+		{Name: "Ann", Tags: []string{"Old"}},
+		{Name: "Ben", Tags: []string{"Kept"}},
+	})
+
+	// Default: the unused Tag stays.
+	mustImport(t, ts, "application/json",
+		[]byte(`{"list_name":"New","entries":[{"name":"Cy","tags":["Kept"]}]}`))
+	names := readTagNames(t, ts)
+	if !slices.Contains(names, "Old") || !slices.Contains(names, "Kept") {
+		t.Errorf("tags after import = %v, want Old and Kept: unused Tags stay by default", names)
+	}
+
+	// With the option the unused Tag is removed.
+	status, out := importRawOpts(t, ts, "application/json",
+		[]byte(`{"list_name":"New","entries":[{"name":"Cy","tags":["Kept"]}]}`),
+		"remove_unused_tags=1")
+	if status != http.StatusCreated {
+		t.Fatalf("import with remove_unused_tags = %d (%s), want 201", status, out)
+	}
+	names = readTagNames(t, ts)
+	if slices.Contains(names, "Old") {
+		t.Errorf("tags after import with the option = %v, want Old gone", names)
+	}
+	if !slices.Contains(names, "Kept") {
+		t.Errorf("tags after import with the option = %v, want Kept to stay", names)
 	}
 }
 
