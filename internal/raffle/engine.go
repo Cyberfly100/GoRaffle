@@ -105,3 +105,33 @@ func potOf(pool []db.PoolEntry) []db.PoolEntry {
 	}
 	return pot
 }
+
+// MarkedEntry is an Entry marked with where it stands for the next Draw under
+// a tag filter.
+type MarkedEntry struct {
+	model.Entry
+	Eligible bool // in the Eligible pool
+	InPot    bool // in the Pot: could win the next Draw
+}
+
+// MarkEntries returns every Entry on the List, marked by the same Eligible pool
+// and Pot a Draw under the tag filter would use, read from one snapshot.
+func (e *Engine) MarkEntries(ctx context.Context, mustHave, anyOf []string) ([]MarkedEntry, error) {
+	entries, pool, err := e.store.EntriesAndPool(ctx, mustHave, anyOf)
+	if err != nil {
+		return nil, err
+	}
+	eligible := make(map[int]bool, len(pool))
+	for _, p := range pool {
+		eligible[p.ID] = true
+	}
+	pot := make(map[int]bool)
+	for _, p := range potOf(pool) {
+		pot[p.ID] = true
+	}
+	out := make([]MarkedEntry, len(entries))
+	for i, entry := range entries {
+		out[i] = MarkedEntry{Entry: entry, Eligible: eligible[entry.ID], InPot: pot[entry.ID]}
+	}
+	return out, nil
+}

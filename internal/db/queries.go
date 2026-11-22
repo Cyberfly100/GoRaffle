@@ -61,7 +61,30 @@ func NewStore(db *sql.DB) *Store {
 
 // ListEntries returns all entries with their tags, ordered by name.
 func (s *Store) ListEntries(ctx context.Context) ([]model.Entry, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	return listEntries(ctx, s.DB)
+}
+
+// EntriesAndPool returns every Entry and the Eligible pool under the tag
+// filter, both read from one snapshot so they always agree.
+func (s *Store) EntriesAndPool(ctx context.Context, mustHave, anyOf []string) ([]model.Entry, []PoolEntry, error) {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	entries, err := listEntries(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	pool, err := eligiblePool(ctx, tx, mustHave, anyOf)
+	if err != nil {
+		return nil, nil, err
+	}
+	return entries, pool, tx.Commit()
+}
+
+func listEntries(ctx context.Context, q querier) ([]model.Entry, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT c.id, c.name, c.pick_count, c.excluded,
 		       COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}'::text[]),
 		       COALESCE(array_agg(t.id ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '{}'::int[])
