@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/lib/pq"
@@ -31,11 +30,15 @@ func (s *Store) GetListName(ctx context.Context) (string, error) {
 
 // SetListName updates the list name in settings.
 func (s *Store) SetListName(ctx context.Context, name string) error {
+	return setListName(ctx, s.DB, name)
+}
+
+func setListName(ctx context.Context, q querier, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Entries"
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 		INSERT INTO settings (key, value) VALUES ('list_name', $1)
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, name)
 	return err
@@ -138,10 +141,14 @@ func (s *Store) AddEntry(ctx context.Context, tx *sql.Tx, name string) (model.En
 
 // GetEntry returns a single entry by id with tags.
 func (s *Store) GetEntry(ctx context.Context, id int) (model.Entry, error) {
+	return getEntry(ctx, s.DB, id)
+}
+
+func getEntry(ctx context.Context, q querier, id int) (model.Entry, error) {
 	var c model.Entry
 	var tags []string
 	var tagIDs64 []int64
-	err := s.DB.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		SELECT c.id, c.name, c.pick_count, c.excluded,
 		       COALESCE(array_agg(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}'::text[]),
 		       COALESCE(array_agg(t.id ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '{}'::int[])
@@ -212,8 +219,8 @@ func (s *Store) ClearEntries(ctx context.Context) error {
 	return err
 }
 
-// eligibleWhere is the tag-filter predicate shared by both eligible-pool
-// queries. $1 = mustHave (ALL required), $2 = anyOf (at least one).
+// eligibleWhere is the tag-filter predicate of the Eligible pool query.
+// $1 = mustHave (ALL required), $2 = anyOf (at least one).
 const eligibleWhere = `
   AND (
     array_length($1::text[], 1) IS NULL
@@ -235,121 +242,6 @@ const eligibleWhere = `
     )
   )`
 
-// EligiblePool returns the ids of non-excluded entries that pass the tag filter
-// (mustHave = ALL required, anyOf = at least one; empty both = no filter).
-func (s *Store) EligiblePool(ctx context.Context, mustHave, anyOf []string) ([]int, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT c.id
-		FROM entries c
-		WHERE c.excluded = FALSE`+eligibleWhere, toNullArray(mustHave), toNullArray(anyOf))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int
-	for rows.Next() {
-		var id int
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
-}
-
-// EligibleEntries returns the full entries that pass the tag filter and
-// are not excluded (used for the suspense animation pool).
-func (s *Store) EligibleEntries(ctx context.Context, mustHave, anyOf []string) ([]model.Entry, error) {
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT c.id, c.name, c.pick_count, c.excluded
-		FROM entries c
-		WHERE c.excluded = FALSE`+eligibleWhere+`
-		ORDER BY c.name`, toNullArray(mustHave), toNullArray(anyOf))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []model.Entry
-	for rows.Next() {
-		var c model.Entry
-		if err := rows.Scan(&c.ID, &c.Name, &c.PickCount, &c.Excluded); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	if out == nil {
-		out = []model.Entry{}
-	}
-	return out, rows.Err()
-}
-
-// DrawLeaderboard returns ids + pick_count for a set of ids ordered by count ascending,
-// so the engine can pick among the minimum-count ties.
-func (s *Store) DrawLeaderboard(ctx context.Context, ids []int) (map[int]int, error) {
-	if len(ids) == 0 {
-		return map[int]int{}, nil
-	}
-	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
-		args[i] = id
-	}
-	query := fmt.Sprintf(`SELECT id, pick_count FROM entries WHERE id IN (%s)`,
-		strings.Join(placeholders, ","))
-	rows, err := s.DB.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make(map[int]int, len(ids))
-	for rows.Next() {
-		var id, count int
-		if err := rows.Scan(&id, &count); err != nil {
-			return nil, err
-		}
-		out[id] = count
-	}
-	return out, rows.Err()
-}
-
-// RecordPick inserts a pick and increments the winner's count atomically.
-// The pick number is derived inside the transaction as MAX(pick_number)+1.
-// Returns the new count, the assigned pick number, and the pick id.
-func (s *Store) RecordPick(ctx context.Context, tx *sql.Tx, entryID int) (int, int, int, error) {
-	q := querier(s.DB)
-	if tx != nil {
-		q = tx
-	}
-
-	if _, err := q.ExecContext(ctx,
-		`SELECT 1 FROM entries WHERE id = $1 FOR UPDATE`, entryID); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var next int
-	if err := q.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(pick_number), 0) + 1 FROM picks`).Scan(&next); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var pickID int
-	if err := q.QueryRowContext(ctx,
-		`INSERT INTO picks (entry_id, pick_number) VALUES ($1, $2)
-		 RETURNING id`, entryID, next).Scan(&pickID); err != nil {
-		return 0, 0, 0, err
-	}
-
-	var count int
-	err := q.QueryRowContext(ctx,
-		`UPDATE entries SET pick_count = pick_count + 1, updated_at = NOW()
-		 WHERE id = $1 RETURNING pick_count`, entryID).Scan(&count)
-	return count, next, pickID, err
-}
-
 // LastPick returns the most recent pick with the winner name, or ErrNotFound.
 func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 	var p model.Pick
@@ -364,9 +256,10 @@ func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 	return p, err
 }
 
-// UndoLastPick atomically removes the last pick and decrements the winner's count.
+// UndoLastPick atomically removes the last pick and decrements the winner's count,
+// serialized against Draws and Reset.
 func (s *Store) UndoLastPick(ctx context.Context) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -421,17 +314,48 @@ func (s *Store) ListHistory(ctx context.Context) ([]model.Pick, error) {
 	return out, rows.Err()
 }
 
-// ImportEntries upserts entries by name inside one transaction.
-// Returns counts of added and updated rows. Existing names' count/excluded are
-// updated only when the import supplies them; tags are replaced when supplied.
-func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (added, updated int, err error) {
+// ReadList returns the List: its name and every Entry with its Pick count,
+// Excluded flag and Tags, ordered by name.
+func (s *Store) ReadList(ctx context.Context) (model.List, error) {
+	name, err := s.GetListName(ctx)
+	if err != nil {
+		return model.List{}, err
+	}
+	entries, err := s.ListEntries(ctx)
+	if err != nil {
+		return model.List{}, err
+	}
+	l := model.List{Name: name, Entries: make([]model.ListEntry, 0, len(entries))}
+	for _, e := range entries {
+		l.Entries = append(l.Entries, model.ListEntry{
+			Name:      e.Name,
+			PickCount: &e.PickCount,
+			Excluded:  &e.Excluded,
+			Tags:      e.Tags,
+		})
+	}
+	return l, nil
+}
+
+// ApplyList merges an imported List into the database in one transaction:
+// either all of it lands or none of it does. The List name is set only when
+// the List carries one. Entries are matched by name; new ones are added, and
+// existing ones get Pick count and Excluded only where the List supplies them.
+// Tags are replaced when supplied, created as needed.
+func (s *Store) ApplyList(ctx context.Context, l model.List) (added, updated int, err error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	for _, ci := range in {
+	if strings.TrimSpace(l.Name) != "" {
+		if err := setListName(ctx, tx, l.Name); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	for _, ci := range l.Entries {
 		name := strings.TrimSpace(ci.Name)
 		if name == "" {
 			continue
@@ -444,7 +368,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 		if errors.Is(err, sql.ErrNoRows) {
 			exists = false
 		} else if err != nil {
-			return added, updated, err
+			return 0, 0, err
 		}
 
 		count := 0
@@ -457,7 +381,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 				 VALUES ($1, $2, $3) RETURNING id`,
 				name, count, boolOr(ci.Excluded, false)).Scan(&id)
 			if err != nil {
-				return added, updated, err
+				return 0, 0, err
 			}
 			added++
 		} else {
@@ -470,7 +394,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 					 WHERE id = $1`,
 					id, ci.PickCount, ci.Excluded)
 				if err != nil {
-					return added, updated, err
+					return 0, 0, err
 				}
 			}
 			updated++
@@ -478,7 +402,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 
 		if len(ci.Tags) > 0 {
 			if err := s.SetEntryTags(ctx, tx, id, ci.Tags); err != nil {
-				return added, updated, err
+				return 0, 0, err
 			}
 		}
 	}
@@ -496,9 +420,10 @@ func boolOr(b *bool, def bool) bool {
 	return def
 }
 
-// ResetScores zeroes all counts and clears pick history in a transaction.
+// ResetScores zeroes all counts and clears pick history in a transaction
+// serialized against Draws and Undo.
 func (s *Store) ResetScores(ctx context.Context) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err
 	}

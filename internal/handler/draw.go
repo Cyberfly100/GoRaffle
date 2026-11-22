@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -13,10 +11,8 @@ import (
 	"github.com/goraffle/raffle/internal/raffle"
 )
 
-const (
-	suspenseFrames = 30
-	suspenseTotal  = 2000 * time.Millisecond
-)
+// suspenseTotal is how long the Suspense runs before the winner is revealed.
+const suspenseTotal = 2000 * time.Millisecond
 
 func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 	var req model.DrawRequest
@@ -30,7 +26,7 @@ func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 		req.AnyOf = []string{}
 	}
 
-	result, err := s.engine.Draw(r.Context(), req.MustHave, req.AnyOf)
+	reveal, err := s.engine.Draw(r.Context(), req.MustHave, req.AnyOf)
 	if err != nil {
 		if errors.Is(err, raffle.ErrNoEligible) {
 			writeErr(w, http.StatusBadRequest, "no eligible entries")
@@ -40,29 +36,21 @@ func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Gather the eligible pool for the suspense animation, then broadcast
-	// drama + result to all browsers. The HTTP response returns immediately.
-	go s.broadcastDrama(result, req)
+	writeJSON(w, http.StatusOK, reveal)
 
-	writeJSON(w, http.StatusOK, result)
+	// Every connected browser shares the same Reveal. The broadcast runs in
+	// the background so the HTTP response returns immediately.
+	go s.broadcastReveal(reveal)
 }
 
-// broadcastDrama pushes one suspense frame (the full shuffled/unordered pool)
-// followed by the winner, so every connected browser shares the same reveal.
-func (s *Server) broadcastDrama(result *model.DrawResult, req model.DrawRequest) {
-	names := s.eligibleNames(req)
-	frames := []string{}
-	for i := 0; i < suspenseFrames; i++ {
-		if len(names) == 0 {
-			break
-		}
-		frames = append(frames, names[rand.IntN(len(names))])
-	}
+// broadcastReveal pushes the Suspense (names from the Pot) followed, after
+// the Suspense duration, by the winner.
+func (s *Server) broadcastReveal(reveal *raffle.Reveal) {
 	if msg, err := marshalEvent(EventSuspense, map[string]any{
-		"names":     frames,
-		"pool":      result.EligiblePool,
-		"must_have": req.MustHave,
-		"any_of":    req.AnyOf,
+		"names":     reveal.SuspenseNames,
+		"pool":      reveal.EligiblePool,
+		"must_have": reveal.MustHave,
+		"any_of":    reveal.AnyOf,
 	}); err == nil {
 		s.hub.Broadcast(msg)
 	} else {
@@ -72,26 +60,11 @@ func (s *Server) broadcastDrama(result *model.DrawResult, req model.DrawRequest)
 	// Give the client time to run the animation, then resolve.
 	time.Sleep(suspenseTotal)
 
-	if msg, err := marshalEvent(EventWinner, result); err == nil {
+	if msg, err := marshalEvent(EventWinner, reveal); err == nil {
 		s.hub.Broadcast(msg)
 	} else {
 		slogErrorLogger(err, "marshal winner event")
 	}
-}
-
-// eligibleNames returns the names of the eligible, non-excluded pool under the
-// given tag filter, for reuse as suspense animation frames.
-func (s *Server) eligibleNames(req model.DrawRequest) []string {
-	cs, err := s.store.EligibleEntries(context.Background(), req.MustHave, req.AnyOf)
-	if err != nil {
-		slogErrorLogger(err, "fetch eligible pool for suspense")
-		return nil
-	}
-	names := make([]string, 0, len(cs))
-	for _, c := range cs {
-		names = append(names, c.Name)
-	}
-	return names
 }
 
 func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
