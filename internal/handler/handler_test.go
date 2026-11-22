@@ -492,20 +492,52 @@ func TestRevealReplayOnConnect(t *testing.T) {
 	}
 }
 
-// After an Undo or a Reset the last Reveal's Pick is gone, so nothing replays.
-func TestNoRevealReplayAfterUndoOrReset(t *testing.T) {
-	for _, path := range []string{"/api/undo", "/api/reset"} {
-		t.Run(path, func(t *testing.T) {
+// Once the last Reveal's Pick is gone (Undo, Reset, Clear, or deleting the
+// winning Entry), a connecting browser is not sent it.
+func TestNoRevealReplayOncePickIsGone(t *testing.T) {
+	for _, tc := range []struct{ name, method, path string }{
+		{"undo", http.MethodPost, "/api/undo"},
+		{"reset", http.MethodPost, "/api/reset"},
+		{"clear", http.MethodDelete, "/api/entries"},
+		{"delete winner", http.MethodDelete, "/api/entries/{winner}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ts := newTestServer(t)
 			seedVIP(t, ts)
-			postJSON(t, ts, "/api/draw", `{}`)
-			postJSON(t, ts, path, "")
+			var drawn revealEvent
+			if err := json.Unmarshal(postJSON(t, ts, "/api/draw", `{}`), &drawn.Data); err != nil {
+				t.Fatalf("draw response: %v", err)
+			}
+			path := strings.ReplaceAll(tc.path, "{winner}", itoa(drawn.Data.Winner.ID))
+			reqJSON(t, ts, tc.method, path, "")
 			for _, msg := range readEvents(t, dialWS(t, ts), 300*time.Millisecond) {
 				if strings.Contains(string(msg), `"type":"reveal"`) {
-					t.Errorf("replayed a Reveal after %s: %s", path, msg)
+					t.Errorf("replayed a Reveal after %s: %s", tc.name, msg)
 				}
 			}
 		})
+	}
+}
+
+// Deleting an Entry that did not win leaves the Reveal replayable.
+func TestRevealReplaysAfterDeletingAnotherEntry(t *testing.T) {
+	ts := newTestServer(t)
+	aliceID := seedVIP(t, ts)
+	postJSON(t, ts, "/api/draw", `{"must_have":["VIP"]}`) // Alice wins
+	var bob int
+	var entries []model.Entry
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/entries"), &entries); err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	for _, e := range entries {
+		if e.ID != aliceID {
+			bob = e.ID
+		}
+	}
+	reqJSON(t, ts, http.MethodDelete, "/api/entries/"+itoa(bob), "")
+	got := readEvents(t, dialWS(t, ts), 300*time.Millisecond)
+	if len(got) != 1 || !strings.Contains(string(got[0]), `"type":"reveal"`) {
+		t.Errorf("connecting after deleting a non-winner got %s, want the Reveal", got)
 	}
 }
 

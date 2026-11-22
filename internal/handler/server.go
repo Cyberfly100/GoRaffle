@@ -21,7 +21,7 @@ type Server struct {
 	staticFS fs.FS
 	upgrader websocket.Upgrader
 
-	lastReveal lastReveal
+	lastReveal revealReplay
 }
 
 func NewServer(store *db.Store, engine *raffle.Engine, hub *ws.Hub, tmpl *template.Template, staticFS fs.FS) *Server {
@@ -35,7 +35,7 @@ func NewServer(store *db.Store, engine *raffle.Engine, hub *ws.Hub, tmpl *templa
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
-	s.lastReveal.window = defaultRevealReplayWindow
+	s.lastReveal.setWindow(defaultRevealReplayWindow)
 	return s
 }
 

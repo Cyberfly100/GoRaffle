@@ -111,7 +111,6 @@ func (s *Server) clearEntries(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "clear entries")
 		return
 	}
-	s.lastReveal.forget()
 	s.changed(RegionTable, RegionHistory, RegionResult, RegionTagPopover)
 	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
 }

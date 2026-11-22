@@ -317,6 +317,14 @@ func (s *Store) UndoLastPick(ctx context.Context) (model.Pick, error) {
 	return p, nil
 }
 
+// PickStands reports whether the Pick still exists (it has not been undone,
+// reset, or removed with its Entry).
+func (s *Store) PickStands(ctx context.Context, pickID int) (bool, error) {
+	var ok bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM picks WHERE id = $1)`, pickID).Scan(&ok)
+	return ok, err
+}
+
 // ListHistory returns all picks (newest first) with names.
 func (s *Store) ListHistory(ctx context.Context) ([]model.Pick, error) {
 	rows, err := s.DB.QueryContext(ctx, `

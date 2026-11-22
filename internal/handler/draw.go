@@ -47,7 +47,7 @@ func (s *Server) broadcastReveal(reveal *raffle.Reveal) {
 		slogErrorLogger(err, "marshal reveal event")
 		return
 	}
-	s.lastReveal.remember(msg)
+	s.lastReveal.remember(reveal.PickID, msg)
 	s.hub.Broadcast(msg)
 }
 
@@ -61,7 +61,6 @@ func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "undo")
 		return
 	}
-	s.lastReveal.forget()
 
 	info := "Removed last entry: " + last.EntryName
 	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionResult}, Info: info})
@@ -74,7 +73,6 @@ func (s *Server) resetScores(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "reset scores")
 		return
 	}
-	s.lastReveal.forget()
 	s.changed(RegionTable, RegionHistory, RegionResult)
 	writeJSON(w, http.StatusOK, map[string]bool{"reset": true})
 }
