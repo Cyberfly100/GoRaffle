@@ -15,14 +15,7 @@ func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	if req.MustHave == nil {
-		req.MustHave = []string{}
-	}
-	if req.AnyOf == nil {
-		req.AnyOf = []string{}
-	}
-
-	reveal, err := s.engine.Draw(r.Context(), req.MustHave, req.AnyOf)
+	reveal, err := s.engine.Draw(r.Context(), req.TagFilter)
 	if err != nil {
 		if errors.Is(err, raffle.ErrNoEligible) {
 			writeErr(w, http.StatusBadRequest, "no eligible entries")

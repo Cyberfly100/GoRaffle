@@ -21,8 +21,8 @@ type pageData struct {
 	Tags     []model.Tag
 	History  []model.Pick
 	LastPick *model.Pick
-	MustHave []string
-	AnyOf    []string
+	// The Tag filter the table and filter bar are rendered for.
+	model.TagFilter
 	// ListName is rendered into the List name field and the export links so
 	// the page arrives with the current name (no correction after load).
 	ListName string
@@ -92,8 +92,7 @@ func (s *Server) pageIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) partialTable(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	cs, err := s.engine.MarkEntries(r.Context(), q["must_have"], q["any_of"])
+	cs, err := s.engine.MarkEntries(r.Context(), tagFilterOf(r))
 	if err != nil {
 		slogError(w, err, "mark entries")
 		return
@@ -133,10 +132,15 @@ func (s *Server) partialFilter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	renderNamed(w, s, "partial:filter_bar", pageData{
-		Tags:     tags,
-		MustHave: r.URL.Query()["must_have"],
-		AnyOf:    r.URL.Query()["any_of"],
+		Tags:      tags,
+		TagFilter: tagFilterOf(r),
 	})
+}
+
+// tagFilterOf reads the Tag filter from the must_have and any_of query params.
+func tagFilterOf(r *http.Request) model.TagFilter {
+	q := r.URL.Query()
+	return model.TagFilter{MustHave: q["must_have"], AnyOf: q["any_of"]}
 }
 
 func (s *Server) partialTagPopover(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +181,7 @@ func renderNamed(w http.ResponseWriter, s *Server, name string, data any) {
 
 func (s *Server) buildPageData(ctx context.Context) (pageData, error) {
 	// The page always starts with an empty Tag filter.
-	cs, err := s.engine.MarkEntries(ctx, nil, nil)
+	cs, err := s.engine.MarkEntries(ctx, model.TagFilter{})
 	if err != nil {
 		return pageData{}, err
 	}

@@ -54,10 +54,9 @@ func (s *Store) beginPicksTx(ctx context.Context) (*sql.Tx, error) {
 	return tx, nil
 }
 
-// EligiblePool returns the Eligible pool under the tag filter
-// (mustHave = ALL required, anyOf = at least one; both empty = no filter).
-func (p *PicksTx) EligiblePool(ctx context.Context, mustHave, anyOf []string) ([]PoolEntry, error) {
-	return eligiblePool(ctx, p.tx, mustHave, anyOf)
+// EligiblePool returns the Eligible pool under the Tag filter.
+func (p *PicksTx) EligiblePool(ctx context.Context, filter model.TagFilter) ([]PoolEntry, error) {
+	return eligiblePool(ctx, p.tx, filter)
 }
 
 // EntryWithTags returns one Entry with its Tags.
@@ -72,12 +71,12 @@ func (p *PicksTx) RecordPick(ctx context.Context, entryID int) (count, pickNumbe
 	return recordPick(ctx, p.tx, entryID)
 }
 
-func eligiblePool(ctx context.Context, q querier, mustHave, anyOf []string) ([]PoolEntry, error) {
+func eligiblePool(ctx context.Context, q querier, filter model.TagFilter) ([]PoolEntry, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT c.id, c.name, c.pick_count
 		FROM entries c
 		WHERE c.excluded = FALSE`+eligibleWhere+`
-		ORDER BY c.id`, toNullArray(mustHave), toNullArray(anyOf))
+		ORDER BY c.id`, toNullArray(filter.MustHave), toNullArray(filter.AnyOf))
 	if err != nil {
 		return nil, err
 	}

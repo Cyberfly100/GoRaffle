@@ -64,9 +64,9 @@ func (s *Store) ListEntries(ctx context.Context) ([]model.Entry, error) {
 	return listEntries(ctx, s.DB)
 }
 
-// EntriesAndPool returns every Entry and the Eligible pool under the tag
+// EntriesAndPool returns every Entry and the Eligible pool under the Tag
 // filter, both read from one snapshot so they always agree.
-func (s *Store) EntriesAndPool(ctx context.Context, mustHave, anyOf []string) ([]model.Entry, []PoolEntry, error) {
+func (s *Store) EntriesAndPool(ctx context.Context, filter model.TagFilter) ([]model.Entry, []PoolEntry, error) {
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, nil, err
@@ -76,7 +76,7 @@ func (s *Store) EntriesAndPool(ctx context.Context, mustHave, anyOf []string) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	pool, err := eligiblePool(ctx, tx, mustHave, anyOf)
+	pool, err := eligiblePool(ctx, tx, filter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -242,8 +242,8 @@ func (s *Store) ClearEntries(ctx context.Context) error {
 	return err
 }
 
-// eligibleWhere is the tag-filter predicate of the Eligible pool query.
-// $1 = mustHave (ALL required), $2 = anyOf (at least one).
+// eligibleWhere is the Tag filter predicate of the Eligible pool query.
+// $1 = Must-have Tags (ALL required), $2 = any-of Tags (at least one).
 const eligibleWhere = `
   AND (
     array_length($1::text[], 1) IS NULL
