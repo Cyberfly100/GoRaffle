@@ -58,7 +58,7 @@ async function entryNamesInTable(page) {
   return page.locator('#entry-table textarea[data-field="name"]').evaluateAll((els) => els.map((e) => e.value));
 }
 
-// The two export links' targets, parsed.
+// The export link's target, parsed.
 async function exportLinkNames(page) {
   const hrefs = await page.locator("#import-export .export-row a").evaluateAll((as) => as.map((a) => a.href));
   return hrefs.map((h) => new URL(h).searchParams.get("name"));

@@ -56,7 +56,7 @@ test.describe("import", () => {
 });
 
 test.describe("import with a List name", () => {
-  test("updates the List name field and both export links", async ({ page }) => {
+  test("updates the List name field and the export link", async ({ page }) => {
     await page.goto("/");
     await h.openImportExport(page);
 
@@ -64,6 +64,6 @@ test.describe("import with a List name", () => {
 
     await expect(h.toast(page)).toHaveText("Imported: 1 added, 0 updated.");
     await expect(page.locator("#list-name")).toHaveValue("Chess Club");
-    await expect.poll(() => h.exportLinkNames(page)).toEqual(["Chess Club", "Chess Club"]);
+    await expect.poll(() => h.exportLinkNames(page)).toEqual(["Chess Club"]);
   });
 });

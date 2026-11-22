@@ -140,14 +140,14 @@ test("a rename of the List in one browser shows in every other browser", async (
 
   await expect(other.locator("#list-name")).toHaveValue("Chess Club");
   await h.openImportExport(other);
-  await expect.poll(() => h.exportLinkNames(other)).toEqual(["Chess Club", "Chess Club"]);
+  await expect.poll(() => h.exportLinkNames(other)).toEqual(["Chess Club"]);
   await other.context().close();
 });
 
-test("the page arrives with a non-default List name in the field and the export links", async ({ page, request }) => {
+test("the page arrives with a non-default List name in the field and the export link", async ({ page, request }) => {
   await setListName(request, "Chess Club");
   await page.route("**/static/js/app.js", (route) => route.abort());
   await page.goto("/");
   await expect(page.locator("#list-name")).toHaveValue("Chess Club");
-  await expect.poll(() => h.exportLinkNames(page)).toEqual(["Chess Club", "Chess Club"]);
+  await expect.poll(() => h.exportLinkNames(page)).toEqual(["Chess Club"]);
 });
