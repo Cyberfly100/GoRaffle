@@ -20,6 +20,8 @@ export const HORIZONTAL = Object.freeze({
   cssSize: "width",
   client: "clientWidth",
   cellVar: "--cell-w",
+  rectStart: "left",
+  rectEnd: "right",
 });
 
 export const VERTICAL = Object.freeze({
@@ -31,6 +33,8 @@ export const VERTICAL = Object.freeze({
   cssSize: "height",
   client: "clientHeight",
   cellVar: "--cell-h",
+  rectStart: "top",
+  rectEnd: "bottom",
 });
 
 // planLanding returns the landing plan:

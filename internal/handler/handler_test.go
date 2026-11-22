@@ -147,6 +147,18 @@ func TestIndexAndEmptyState(t *testing.T) {
 			t.Errorf("GET %s = %d", path, res.StatusCode)
 		}
 	}
+	// The browser code is native ES modules: browsers refuse a module that is
+	// not served with a JavaScript MIME type.
+	for _, path := range []string{"/static/js/app.js", "/static/js/ws.js", "/static/js/reel.js", "/static/js/reel-plan.js", "/static/js/sound.js", "/static/js/confetti.js"} {
+		res, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 200 || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/javascript") {
+			t.Errorf("GET %s = %d %q, want 200 text/javascript", path, res.StatusCode, res.Header.Get("Content-Type"))
+		}
+	}
 }
 
 // Full round trip: add, rename, tag, draw (filter), undo, reset, clear.

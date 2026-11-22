@@ -41,8 +41,8 @@
     {{template "content" .}}
   </main>
 
-  <script src="/static/js/ws.js"></script>
-  <script src="/static/js/app.js"></script>
+  <!-- Native ES modules, served as they are: app.js imports the rest. -->
+  <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>
 {{end}}
