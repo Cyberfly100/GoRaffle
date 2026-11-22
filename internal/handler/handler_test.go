@@ -351,41 +351,44 @@ func TestUndoPickCountFloor(t *testing.T) {
 	}
 }
 
-func TestImportMerges(t *testing.T) {
+// An Import replaces the whole List and reports what landed.
+func TestImportReplaces(t *testing.T) {
 	ts := newTestServer(t)
 
 	// JSON import with names only.
-	res := postJSON(t, ts, "/api/import", `{"entries":[{"name":"One"},{"name":"Two"}]}`)
+	res := postJSON(t, ts, "/api/import", `{"list_name":"Club","entries":[{"name":"One"},{"name":"Two"}]}`)
 	var r struct {
-		Added   int `json:"added"`
-		Updated int `json:"updated"`
+		ListName string `json:"list_name"`
+		Entries  int    `json:"entries"`
+		Picks    int    `json:"picks"`
 	}
 	if err := json.Unmarshal(res, &r); err != nil {
 		t.Fatalf("import response: %v (%s)", err, res)
 	}
-	if r.Added != 2 || r.Updated != 0 {
-		t.Errorf("import added=%d updated=%d, want 2/0", r.Added, r.Updated)
+	if r.ListName != "Club" || r.Entries != 2 || r.Picks != 0 {
+		t.Errorf("import = %q, %d entries, %d picks, want Club/2/0", r.ListName, r.Entries, r.Picks)
 	}
 
-	// Re-import same names with a count -> upserts, 0 added.
+	// Re-import with a count replaces again: only the file's Entries land.
 	res = postJSON(t, ts, "/api/import", `{"entries":[{"name":"One","pick_count":7}]}`)
 	if err := json.Unmarshal(res, &r); err != nil {
 		t.Fatalf("re-import response: %v (%s)", err, res)
 	}
-	if r.Added != 0 || r.Updated != 1 {
-		t.Errorf("re-import added=%d updated=%d, want 0/1", r.Added, r.Updated)
+	if r.ListName != "Entries" || r.Entries != 1 {
+		t.Errorf("re-import = %q, %d entries, want Entries/1", r.ListName, r.Entries)
 	}
 
-	// Export includes the data.
+	// The file's Pick count lands; Entries absent from the file are gone.
 	assertBodyContains(t, ts, "/api/export?format=json", `"pick_count":7`)
+	assertBodyNotContains(t, ts, "/api/entries", `"Two"`)
 
 	// Import with tags flows through the transaction path (SetEntryTags).
 	res = postJSON(t, ts, "/api/import", `{"entries":[{"name":"Three","tags":["VIP","TeamA"]}]}`)
 	if err := json.Unmarshal(res, &r); err != nil {
 		t.Fatalf("tagged import response: %v (%s)", err, res)
 	}
-	if r.Added != 1 {
-		t.Errorf("tagged import added=%d, want 1", r.Added)
+	if r.Entries != 1 {
+		t.Errorf("tagged import = %d entries, want 1", r.Entries)
 	}
 	assertBodyContains(t, ts, "/api/entries", `"VIP"`)
 
@@ -394,8 +397,8 @@ func TestImportMerges(t *testing.T) {
 	if err := json.Unmarshal(res, &r); err != nil {
 		t.Fatalf("legacy import response: %v (%s)", err, res)
 	}
-	if r.Added != 1 {
-		t.Errorf("legacy-keyed import added=%d, want 1", r.Added)
+	if r.Entries != 1 {
+		t.Errorf("legacy-keyed import = %d entries, want 1", r.Entries)
 	}
 }
 
@@ -757,6 +760,13 @@ func bodyOf(t *testing.T, ts *httptest.Server, path string) []byte {
 		t.Fatalf("GET %s = %d (%s)", path, res.StatusCode, out)
 	}
 	return out
+}
+
+func assertBodyNotContains(t *testing.T, ts *httptest.Server, path, unwanted string) {
+	t.Helper()
+	if out := bodyOf(t, ts, path); strings.Contains(string(out), unwanted) {
+		t.Errorf("GET %s contains %q\nbody: %s", path, unwanted, out)
+	}
 }
 
 func assertBodyContainsRaw(t *testing.T, body []byte, want string) {

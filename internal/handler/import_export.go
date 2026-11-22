@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/goraffle/raffle/internal/db"
 	"github.com/goraffle/raffle/internal/listexchange"
 )
 
@@ -71,7 +72,9 @@ func (s *Server) exportData(w http.ResponseWriter, r *http.Request) {
 }
 
 // importData reads an uploaded (multipart "file" field) or directly posted
-// List file, decodes it and applies it to the store in one transaction.
+// List file, decodes it and replaces the List with what it says, in one
+// transaction. A direct request replaces at once: there is no confirmation
+// flag, only the "skip missing Picks" and "remove unused Tags" options.
 func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 	body, hint, err := readUpload(r)
 	if err != nil {
@@ -83,13 +86,43 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "could not parse import: "+err.Error())
 		return
 	}
-	added, updated, err := s.store.ApplyList(r.Context(), list)
+	// FormValue reads the query string, and the multipart form's fields
+	// once readUpload has parsed it.
+	opts := db.ImportOptions{
+		SkipMissingPicks: isTrue(r.FormValue("skip_missing_picks")),
+		RemoveUnusedTags: isTrue(r.FormValue("remove_unused_tags")),
+	}
+	res, err := s.store.ImportList(r.Context(), list, opts)
+	var missing *db.MissingEntriesError
+	if errors.As(err, &missing) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error":         missing.Error(),
+			"missing_names": missing.Names,
+			"missing_picks": missing.Picks,
+		})
+		return
+	}
 	if err != nil {
 		slogError(w, err, "import list")
 		return
 	}
-	s.changed(RegionTable, RegionFilter, RegionTagPopover, RegionListName)
-	writeJSON(w, http.StatusCreated, map[string]any{"added": added, "updated": updated, "list_name": list.Name})
+	// The whole page is stale: every connected browser shows the imported
+	// List right away.
+	s.changed(RegionTable, RegionHistory, RegionLastPick, RegionFilter, RegionTagPopover, RegionListName)
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"list_name": res.ListName,
+		"entries":   res.Entries,
+		"picks":     res.Picks,
+	})
+}
+
+// isTrue reports whether a request option flag is switched on.
+func isTrue(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // readUpload returns the import file's bytes and its content-type hint. A

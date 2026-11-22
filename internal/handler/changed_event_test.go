@@ -175,7 +175,8 @@ func TestEveryChangeBroadcastsOneChangedEvent(t *testing.T) {
 			act: func(t *testing.T, ts *httptest.Server, _ string) {
 				postJSON(t, ts, "/api/import", `{"list_name":"Club","entries":[{"name":"Ada","tags":["VIP"]}]}`)
 			},
-			regions: []string{"table", "filter", "tag-popover", "list-name"},
+			// An Import replaces the whole List: every region is stale.
+			regions: []string{"table", "history", "result", "filter", "tag-popover", "list-name"},
 		},
 		{
 			name:    "rename the List",

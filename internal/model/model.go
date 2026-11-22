@@ -46,15 +46,17 @@ type DrawRequest struct {
 
 // List is the named set of Entries a raffle draws from, as it crosses between
 // the List exchange (import/export), the handlers and the store.
-// An empty Name means "no name supplied": importing it keeps the current name.
+// An empty Name means "no name supplied": an Import then resets the List
+// name to "Entries".
 type List struct {
 	Name    string
 	Entries []ListEntry
 	Picks   []ListPick
 }
 
-// ListEntry is one Entry of a List. Nil PickCount/Excluded and a nil Tags
-// slice mean "not supplied": merging leaves the existing value as is.
+// ListEntry is one Entry of a List. Nil PickCount means "not supplied": an
+// Import then sets it to the number of the Entry's Picks in the file.
+// Nil Excluded means false. A nil Tags slice means no Tags.
 type ListEntry struct {
 	Name      string
 	PickCount *int

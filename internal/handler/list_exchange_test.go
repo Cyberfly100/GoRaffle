@@ -338,31 +338,6 @@ func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
 	assertList(t, readList(t, ts), before)
 }
 
-func TestImportWithoutListNameKeepsCurrentName(t *testing.T) {
-	cases := map[string]struct {
-		contentType string
-		body        string
-	}{
-		"bare JSON names":          {"application/json", `["Ann","Ben"]`},
-		"JSON object without name": {"application/json", `{"entries":[{"name":"Ann"},{"name":"Ben"}]}`},
-		"CSV without name row":     {"text/csv", "name,pick_count,excluded,tags\nAnn,0,false,\nBen,0,false,\n"},
-	}
-	for label, c := range cases {
-		t.Run(label, func(t *testing.T) {
-			ts := newTestServer(t)
-			putJSON(t, ts, "/api/list-name", `{"name":"Our List"}`)
-			mustImport(t, ts, c.contentType, []byte(c.body))
-			assertList(t, readList(t, ts), listSnapshot{
-				Name: "Our List",
-				Entries: []listEntry{
-					{Name: "Ann", Tags: []string{}},
-					{Name: "Ben", Tags: []string{}},
-				},
-			})
-		})
-	}
-}
-
 func TestImportSupportedShapes(t *testing.T) {
 	cases := map[string]struct {
 		contentType string
@@ -410,23 +385,24 @@ func TestImportSupportedShapes(t *testing.T) {
 	}
 }
 
-// Merging by name only overwrites the fields the file supplies.
-func TestImportMergesOnlySuppliedFields(t *testing.T) {
+// An Import replaces, never merges: importing a bare list of names over a
+// richer List leaves exactly those names, with no History and no leftover
+// fields. The result depends only on the file.
+func TestImportReplacesEverything(t *testing.T) {
 	ts := newTestServer(t)
 	seedList(t, ts, "Merge", []listEntry{
 		{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
-		{Name: "Ben", PickCount: 1, Excluded: false, Tags: []string{"Old"}},
+		{Name: "Ben", PickCount: 1, Tags: []string{"Old"}},
 	})
+	postJSON(t, ts, "/api/draw", `{}`) // the History is non-empty
 	mustImport(t, ts, "application/json", []byte(`["Ann"]`))
-	mustImport(t, ts, "application/json", []byte(`{"entries":[{"name":"ben","excluded":true,"tags":["New"]},{"name":"Cy"}]}`))
 	assertList(t, readList(t, ts), listSnapshot{
-		Name: "Merge",
-		Entries: []listEntry{
-			{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
-			{Name: "Ben", PickCount: 1, Excluded: true, Tags: []string{"New"}},
-			{Name: "Cy", Tags: []string{}},
-		},
+		Name:    "Entries",
+		Entries: []listEntry{{Name: "Ann", Tags: []string{}}},
 	})
+	if picks := readHistory(t, ts); len(picks) != 0 {
+		t.Errorf("history after import = %+v, want empty", picks)
+	}
 }
 
 // The History is part of the List file: a Pick with a missing or
@@ -503,6 +479,91 @@ func TestImportRejectsDuplicateEntryNames(t *testing.T) {
 			if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Ann" {
 				t.Errorf("history after rejected import = %+v, want the seeded Pick", picks)
 			}
+		})
+	}
+}
+
+// Importing a List file restores exactly what the file says: the List
+// name, the Entries and the History are replaced, Entries absent from the
+// file are gone, and exporting again reproduces the file byte for byte.
+func TestImportRestoresTheListFile(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Drawn List", []listEntry{
+		{Name: "Ann", Tags: []string{"VIP"}},
+		{Name: "Ben", Tags: []string{}},
+	})
+	// Two Draws pick Ann and Ben once each, in an order only the file knows.
+	postJSON(t, ts, "/api/draw", `{}`)
+	postJSON(t, ts, "/api/draw", `{}`)
+	drawnPicks := readHistory(t, ts)
+	if len(drawnPicks) != 2 {
+		t.Fatalf("seeded history has %d Picks, want 2", len(drawnPicks))
+	}
+
+	first, _ := export(t, ts, "json")
+	var file struct {
+		Picks []pickJSON `json:"picks"`
+	}
+	if err := json.Unmarshal(first, &file); err != nil {
+		t.Fatalf("export: %v (%s)", err, first)
+	}
+
+	// A different List is in place: the file must fully replace it.
+	seedList(t, ts, "Other List", []listEntry{
+		{Name: "Zed", PickCount: 9, Excluded: true, Tags: []string{"Old"}},
+	})
+	mustImport(t, ts, "application/json", first)
+
+	want := listSnapshot{
+		Name: "Drawn List",
+		Entries: []listEntry{
+			{Name: "Ann", PickCount: 1, Tags: []string{"VIP"}},
+			{Name: "Ben", PickCount: 1, Tags: []string{}},
+		},
+	}
+	assertList(t, readList(t, ts), want)
+	if picks := readHistory(t, ts); len(picks) != 2 {
+		t.Errorf("history after import = %d Picks, want the file's 2", len(picks))
+	} else {
+		for i, p := range picks {
+			if p.EntryName != file.Picks[i].EntryName || p.PickNumber != i+1 {
+				t.Errorf("pick %d after import = %+v, want %s #%d", i, p, file.Picks[i].EntryName, i+1)
+			}
+			if p.PickedAt != file.Picks[i].PickedAt {
+				t.Errorf("pick %d time after import = %q, want the file's %q", i, p.PickedAt, file.Picks[i].PickedAt)
+			}
+		}
+	}
+
+	second, _ := export(t, ts, "json")
+	if !bytes.Equal(first, second) {
+		t.Errorf("re-export differs\nfirst:  %s\nsecond: %s", first, second)
+	}
+}
+
+// A List file without a name resets the List name to "Entries": the
+// result depends only on the file.
+func TestImportWithoutListNameResetsToEntries(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+	}{
+		"bare JSON names":          {"application/json", `["Ann","Ben"]`},
+		"JSON object without name": {"application/json", `{"entries":[{"name":"Ann"},{"name":"Ben"}]}`},
+		"CSV without name row":     {"text/csv", "name,pick_count,excluded,tags\nAnn,0,false,\nBen,0,false,\n"},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			putJSON(t, ts, "/api/list-name", `{"name":"Our List"}`)
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), listSnapshot{
+				Name: "Entries",
+				Entries: []listEntry{
+					{Name: "Ann", Tags: []string{}},
+					{Name: "Ben", Tags: []string{}},
+				},
+			})
 		})
 	}
 }
