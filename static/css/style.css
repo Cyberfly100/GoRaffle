@@ -1420,6 +1420,19 @@ dialog::backdrop {
   font-size: 0.9rem;
 }
 
+.import-missing {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  font-size: 0.9rem;
+}
+
+.import-missing p {
+  margin: 0 0 0.5rem;
+}
+
 .ie-close {
   position: absolute;
   top: 0.5rem;

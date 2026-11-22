@@ -538,6 +538,21 @@ function resetImportForm() {
   if (input) input.value = "";
   const nameEl = $("#file-chosen");
   if (nameEl) nameEl.textContent = "No file chosen";
+  const missing = $("#import-missing");
+  if (missing) missing.hidden = true;
+}
+
+// The 422 answer to a file whose Picks name Entries it doesn't contain:
+// the warning names them, counts the affected Picks, and offers to skip.
+function showImportMissing(names, picks) {
+  const box = $("#import-missing");
+  const text = $("#import-missing-text");
+  if (!box || !text) return;
+  const count = picks ?? 0;
+  text.textContent =
+    `The file's Picks name Entries that aren't in the file: ${names.join(", ")}. ` +
+    `${count} ${count === 1 ? "Pick" : "Picks"} would be skipped.`;
+  box.hidden = false;
 }
 
 async function doImport(opts = {}) {
@@ -563,6 +578,11 @@ async function doImport(opts = {}) {
     return;
   }
   const data = await resp.json().catch(() => ({}));
+  if (resp.status === 422 && Array.isArray(data.missing_names)) {
+    // Nothing changed: the warning stays open and offers the skip.
+    showImportMissing(data.missing_names, data.missing_picks);
+    return;
+  }
   if (!resp.ok) {
     toast(data.error || "Import failed.");
     closeImportConfirm();
@@ -588,6 +608,10 @@ function bindImportConfirm() {
   document.addEventListener("click", (e) => {
     if (e.target.closest("#import-confirm-btn")) {
       doImport({ removeUnusedTags: $("#remove-unused-tags")?.checked });
+      return;
+    }
+    if (e.target.closest("#import-skip-btn")) {
+      doImport({ removeUnusedTags: $("#remove-unused-tags")?.checked, skipMissingPicks: true });
       return;
     }
     if (e.target.closest("#import-cancel-btn") || e.target === dialog) {

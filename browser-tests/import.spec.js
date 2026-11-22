@@ -84,6 +84,41 @@ test.describe("import warning", () => {
     await expect.poll(() => h.availableTags(page)).toEqual(["keep"]);
   });
 
+  test("Picks naming missing Entries show the names and count; skipping imports without those Picks", async ({ page, request }) => {
+    await seedEntries(request, ["Ann"]);
+    await h.showEntriesOnLoad(page);
+    await page.goto("/");
+    await h.openImportExport(page);
+
+    await page.locator("#import-file").setInputFiles(
+      h.jsonFile("holey.json", {
+        entries: [{ name: "Ben" }],
+        picks: [
+          { entry_name: "Ben", pick_number: 1, picked_at: "2026-11-23T10:00:00Z" },
+          { entry_name: "Ghost", pick_number: 2, picked_at: "2026-11-23T11:00:00Z" },
+          { entry_name: "ghost", pick_number: 3, picked_at: "2026-11-23T12:00:00Z" },
+        ],
+      })
+    );
+    await expect(page.locator("#import-confirm")).toBeVisible();
+    await page.locator("#import-confirm-btn").click();
+
+    // The warning stays open and says which names and how many Picks.
+    await expect(page.locator("#import-confirm")).toBeVisible();
+    await expect(page.locator("#import-missing-text")).toContainText("Ghost");
+    await expect(page.locator("#import-missing-text")).toContainText("2 Picks");
+    await expect(page.locator("#import-skip-btn")).toBeVisible();
+    await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ann"]);
+
+    await page.locator("#import-skip-btn").click();
+
+    await expect(h.toast(page)).toHaveText("Imported: 1 entry, 1 pick.");
+    await expect(page.locator("#import-confirm")).toBeHidden();
+    await h.closeImportExport(page);
+    await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ben"]);
+    await expect.poll(() => h.historyNames(page)).toEqual(["Ben"]);
+  });
+
   test("after an Import a second connected browser shows the new List and History", async ({ page, browser }, testInfo) => {
     await h.showEntriesOnLoad(page);
     await page.goto("/");
