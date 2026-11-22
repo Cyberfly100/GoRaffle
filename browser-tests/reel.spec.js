@@ -101,12 +101,12 @@ test("with reduced motion the winner is shown on the resting Reel without reload
   expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
 });
 
-test("a refresh of the result that lands mid-spin leaves the Reel running", async ({ page, request }) => {
+test("a refresh of the last Pick that lands while the Reel is running leaves it running", async ({ page, request }) => {
   await seedEntries(request, NAMES);
   await page.goto("/");
   await expect(page.locator("#ws-status")).toHaveClass(/\bconnected\b/);
 
-  // Hold the next result refresh until the Reel is spinning.
+  // Hold the next last-Pick refresh until the Reel is running.
   let release;
   const held = new Promise((r) => (release = r));
   let heldOne = false;

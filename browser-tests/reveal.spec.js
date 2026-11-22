@@ -79,7 +79,7 @@ test("a browser reloaded during the Suspense replays the Reveal", async ({ page,
   await expect(page.locator("#result .result-sub")).toHaveText("pick #1", { timeout: 10_000 });
 });
 
-test("a browser opened after the replay window shows the result without a spin", async ({ page, request }) => {
+test("a browser opened after the replay window shows the last Pick with the Reel at rest", async ({ page, request }) => {
   await seedEntries(request, NAMES);
   const drawnAt = Date.now();
   const winner = (await (await request.post("/api/draw", { data: {} })).json()).winner.name;

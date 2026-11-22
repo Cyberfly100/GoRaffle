@@ -64,9 +64,9 @@ func (s *Store) ListEntries(ctx context.Context) ([]model.Entry, error) {
 	return listEntries(ctx, s.DB)
 }
 
-// EntriesAndPool returns every Entry and the Eligible pool under the tag
+// EntriesAndPool returns every Entry and the Eligible pool under the Tag
 // filter, both read from one snapshot so they always agree.
-func (s *Store) EntriesAndPool(ctx context.Context, mustHave, anyOf []string) ([]model.Entry, []PoolEntry, error) {
+func (s *Store) EntriesAndPool(ctx context.Context, filter model.TagFilter) ([]model.Entry, []PoolEntry, error) {
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, nil, err
@@ -76,7 +76,7 @@ func (s *Store) EntriesAndPool(ctx context.Context, mustHave, anyOf []string) ([
 	if err != nil {
 		return nil, nil, err
 	}
-	pool, err := eligiblePool(ctx, tx, mustHave, anyOf)
+	pool, err := eligiblePool(ctx, tx, filter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -242,8 +242,8 @@ func (s *Store) ClearEntries(ctx context.Context) error {
 	return err
 }
 
-// eligibleWhere is the tag-filter predicate of the Eligible pool query.
-// $1 = mustHave (ALL required), $2 = anyOf (at least one).
+// eligibleWhere is the Tag filter predicate of the Eligible pool query.
+// $1 = Must-have Tags (ALL required), $2 = any-of Tags (at least one).
 const eligibleWhere = `
   AND (
     array_length($1::text[], 1) IS NULL
@@ -279,37 +279,50 @@ func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 	return p, err
 }
 
-// UndoLastPick atomically removes the last pick and decrements the winner's count,
-// serialized against Draws and Reset.
-func (s *Store) UndoLastPick(ctx context.Context) error {
+// UndoLastPick atomically removes the last Pick and decrements the winner's
+// Pick count, serialized against Draws and Reset. It returns the Pick it
+// removed, read inside the same transaction, or ErrNotFound.
+func (s *Store) UndoLastPick(ctx context.Context) (model.Pick, error) {
 	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
-		return err
+		return model.Pick{}, err
 	}
 	defer tx.Rollback()
 
-	var entryID, pickNumber int
-	err = tx.QueryRowContext(ctx,
-		`SELECT entry_id, pick_number FROM picks ORDER BY id DESC LIMIT 1 FOR UPDATE`).
-		Scan(&entryID, &pickNumber)
+	var p model.Pick
+	err = tx.QueryRowContext(ctx, `
+		SELECT p.id, p.entry_id, c.name, p.pick_number, p.picked_at
+		FROM picks p JOIN entries c ON c.id = p.entry_id
+		ORDER BY p.id DESC LIMIT 1
+		FOR UPDATE OF p`).
+		Scan(&p.ID, &p.EntryID, &p.EntryName, &p.PickNumber, &p.PickedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return model.Pick{}, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return model.Pick{}, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM picks WHERE id = (
-		   SELECT id FROM picks ORDER BY id DESC LIMIT 1)`); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM picks WHERE id = $1`, p.ID); err != nil {
+		return model.Pick{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE entries SET pick_count = pick_count - 1, updated_at = NOW() WHERE id = $1`,
-		entryID); err != nil {
-		return err
+		p.EntryID); err != nil {
+		return model.Pick{}, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return model.Pick{}, err
+	}
+	return p, nil
+}
+
+// PickStands reports whether the Pick still exists (it has not been undone,
+// reset, or removed with its Entry).
+func (s *Store) PickStands(ctx context.Context, pickID int) (bool, error) {
+	var ok bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM picks WHERE id = $1)`, pickID).Scan(&ok)
+	return ok, err
 }
 
 // ListHistory returns all picks (newest first) with names.
@@ -443,9 +456,9 @@ func boolOr(b *bool, def bool) bool {
 	return def
 }
 
-// ResetScores zeroes all counts and clears pick history in a transaction
-// serialized against Draws and Undo.
-func (s *Store) ResetScores(ctx context.Context) error {
+// Reset clears all Picks and sets every Pick count back to zero, in a
+// transaction serialized against Draws and Undo.
+func (s *Store) Reset(ctx context.Context) error {
 	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err

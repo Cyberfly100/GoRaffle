@@ -226,7 +226,7 @@ function syncReelToggle() {
   const btn = $("#reel-toggle");
   if (!btn) return;
   const vertical = reel.orientation() === "vertical";
-  btn.title = vertical ? "Spinner: vertical — click for horizontal" : "Spinner: horizontal — click for vertical";
+  btn.title = vertical ? "Reel: vertical — click for horizontal" : "Reel: horizontal — click for vertical";
   btn.setAttribute("aria-pressed", vertical ? "true" : "false");
 }
 
@@ -242,7 +242,7 @@ function bindReelToggle() {
     localStorage.setItem("raffle-reel-mode", next === "vertical" ? "v" : "h");
     syncReelToggle();
     // The resting track was dressed for the old orientation (or left bare
-    // for the new one); re-render it so the drum matches.
+    // for the new one); re-render it so the resting Reel matches.
     regions.refresh(["result"]);
   });
 }
@@ -499,7 +499,7 @@ async function doUndo() {
 }
 
 async function doReset() {
-  if (!confirm("Reset all scores and clear history?")) return;
+  if (!confirm("Reset: clear all Picks and set every Pick count to zero?")) return;
   try {
     await api("POST", "/api/reset");
     refreshIfNoWS();

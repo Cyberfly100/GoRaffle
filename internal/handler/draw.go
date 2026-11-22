@@ -15,14 +15,7 @@ func (s *Server) draw(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-	if req.MustHave == nil {
-		req.MustHave = []string{}
-	}
-	if req.AnyOf == nil {
-		req.AnyOf = []string{}
-	}
-
-	reveal, err := s.engine.Draw(r.Context(), req.MustHave, req.AnyOf)
+	reveal, err := s.engine.Draw(r.Context(), req.TagFilter)
 	if err != nil {
 		if errors.Is(err, raffle.ErrNoEligible) {
 			writeErr(w, http.StatusBadRequest, "no eligible entries")
@@ -47,39 +40,33 @@ func (s *Server) broadcastReveal(reveal *raffle.Reveal) {
 		slogErrorLogger(err, "marshal reveal event")
 		return
 	}
-	s.lastReveal.remember(msg)
+	s.lastReveal.remember(reveal.PickID, msg)
 	s.hub.Broadcast(msg)
 }
 
 func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
-	last, err := s.store.LastPick(r.Context())
+	last, err := s.store.UndoLastPick(r.Context())
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeErr(w, http.StatusBadRequest, "cannot undo any further")
 			return
 		}
-		slogError(w, err, "last pick")
-		return
-	}
-	if err := s.store.UndoLastPick(r.Context()); err != nil {
 		slogError(w, err, "undo")
 		return
 	}
-	s.lastReveal.forget()
 
 	info := "Removed last entry: " + last.EntryName
-	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionResult}, Info: info})
+	s.broadcastChanged(Changed{Regions: pickRegions, Info: info})
 
 	writeJSON(w, http.StatusOK, map[string]string{"info": info})
 }
 
-func (s *Server) resetScores(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.ResetScores(r.Context()); err != nil {
-		slogError(w, err, "reset scores")
+func (s *Server) reset(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.Reset(r.Context()); err != nil {
+		slogError(w, err, "reset")
 		return
 	}
-	s.lastReveal.forget()
-	s.changed(RegionTable, RegionHistory, RegionResult)
+	s.changed(pickRegions...)
 	writeJSON(w, http.StatusOK, map[string]bool{"reset": true})
 }
 

@@ -598,7 +598,7 @@ input {
   position: relative;
   overflow: hidden;
   height: 2.6rem;
-  /* Keep the spinner compact and centred rather than letting it stretch the
+  /* Keep the Reel compact and centred rather than letting it stretch the
      full width of the card. */
   max-width: 28rem;
   margin: 0 auto;
@@ -648,7 +648,7 @@ input {
   }
 }
 
-/* Empty run-in that centres the name already on screen when a spin starts. */
+/* Empty run-in that centres the name already on screen when the Suspense starts. */
 .reel-lead {
   flex: 0 0 auto;
   height: 100%;
@@ -732,7 +732,7 @@ input {
   pointer-events: none;
 }
 
-/* The framed slot only appears while spinning. */
+/* The framed slot only appears while the Reel is running. */
 .reel.is-live .reel-frame {
   display: block;
 }
@@ -742,7 +742,7 @@ input {
    strip travels on Y, and the window is taller so more names pass at once.
    JS sets the same custom properties (--cell-h, --loop-from/to) it uses for
    the horizontal belt; only the axis-specific rendering changes here. */
-/* The mask only clips the strip; the drum illusion comes from ::after, which
+/* The mask only clips the strip; the curved-Reel illusion comes from ::after, which
    paints the surface colour over the belt toward both ends — exactly how iOS
    pickers blend their rows into the background. Because the overlay uses the
    card's own colour, the fade always matches the theme and never reads as a

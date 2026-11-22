@@ -40,11 +40,15 @@ type Region string
 const (
 	RegionTable      Region = "table"
 	RegionHistory    Region = "history"
-	RegionResult     Region = "result"
+	RegionLastPick   Region = "result" // the last Pick on the Reel (#result)
 	RegionFilter     Region = "filter"
 	RegionTagPopover Region = "tag-popover"
 	RegionListName   Region = "list-name"
 )
+
+// pickRegions are the regions any change to Picks or Pick counts makes stale:
+// the table (Pick counts, Pot), the History and the last Pick.
+var pickRegions = []Region{RegionTable, RegionHistory, RegionLastPick}
 
 // Changed is the "changed" event's data. Info, when set, is a message for
 // the host (the Undo toast text).

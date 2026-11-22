@@ -78,7 +78,7 @@ func setup(t *testing.T) (*db.Store, *raffle.Engine) {
 	t.Cleanup(func() { conn.Close() })
 	store := db.NewStore(conn)
 	engine := raffle.NewEngine(store)
-	if err := store.ResetScores(context.Background()); err != nil {
+	if err := store.Reset(context.Background()); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if err := store.ClearEntries(context.Background()); err != nil {
@@ -98,7 +98,7 @@ func TestDrawFairness(t *testing.T) {
 	}
 	seen := map[string]int{}
 	for i := 0; i < len(names); i++ {
-		res, err := engine.Draw(ctx, nil, nil)
+		res, err := engine.Draw(ctx, model.TagFilter{})
 		if err != nil {
 			t.Fatalf("draw %d: %v", i, err)
 		}
@@ -117,13 +117,13 @@ func TestDrawMinCountPool(t *testing.T) {
 	a, _ := store.AddEntry(ctx, nil, "high")
 	b, _ := store.AddEntry(ctx, nil, "low")
 	// First draw: both at min (0); winner must be one of them.
-	res, _ := engine.Draw(ctx, nil, nil)
+	res, _ := engine.Draw(ctx, model.TagFilter{})
 	if res.Winner.Name != "high" && res.Winner.Name != "low" {
 		t.Fatalf("unexpected winner %s", res.Winner.Name)
 	}
 	// The winner now has 1; the other is the sole min (0), so it must win next.
 	expected := map[string]string{"high": "low", "low": "high"}[res.Winner.Name]
-	res2, err := engine.Draw(ctx, nil, nil)
+	res2, err := engine.Draw(ctx, model.TagFilter{})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestDrawTagFilterAND(t *testing.T) {
 	bob, _ := store.AddEntry(ctx, nil, "bob")
 	_ = store.SetEntryTags(ctx, nil, alice.ID, []string{"VIP", "TeamA"})
 	_ = store.SetEntryTags(ctx, nil, bob.ID, []string{"VIP"})
-	res, err := engine.Draw(ctx, []string{"VIP", "TeamA"}, nil)
+	res, err := engine.Draw(ctx, model.TagFilter{MustHave: []string{"VIP", "TeamA"}})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -160,8 +160,8 @@ func TestDrawTagFilterOR(t *testing.T) {
 	_ = store.SetEntryTags(ctx, nil, bob.ID, []string{"VIP"})
 	winnerSet := map[string]bool{}
 	for i := 0; i < 30; i++ {
-		store.ResetScores(ctx) // zero counts so everyone is always eligible
-		res, err := engine.Draw(ctx, nil, []string{"VIP"})
+		store.Reset(ctx) // zero counts so everyone is always eligible
+		res, err := engine.Draw(ctx, model.TagFilter{AnyOf: []string{"VIP"}})
 		if err != nil {
 			t.Fatalf("draw %d: %v", i, err)
 		}
@@ -179,7 +179,7 @@ func TestDrawTagFilterOR(t *testing.T) {
 func TestDrawNoEligible(t *testing.T) {
 	_, engine := setup(t)
 	ctx := context.Background()
-	_, err := engine.Draw(ctx, nil, nil)
+	_, err := engine.Draw(ctx, model.TagFilter{})
 	if err == nil {
 		t.Fatal("expected error on empty pool")
 	}
@@ -189,7 +189,7 @@ func TestUndo(t *testing.T) {
 	store, engine := setup(t)
 	ctx := context.Background()
 	store.AddEntry(ctx, nil, "x")
-	res, _ := engine.Draw(ctx, nil, nil)
+	res, _ := engine.Draw(ctx, model.TagFilter{})
 	if res.Winner.Name != "x" {
 		t.Fatal("expected x")
 	}
@@ -197,8 +197,12 @@ func TestUndo(t *testing.T) {
 	if len(picks) != 1 {
 		t.Fatalf("history length = %d, want 1", len(picks))
 	}
-	if err := store.UndoLastPick(ctx); err != nil {
+	undone, err := store.UndoLastPick(ctx)
+	if err != nil {
 		t.Fatalf("undo: %v", err)
+	}
+	if undone.ID != res.PickID || undone.EntryName != "x" || undone.PickNumber != 1 {
+		t.Errorf("undo reported %+v, want Pick %d (#1) of x", undone, res.PickID)
 	}
 	picks, _ = store.ListHistory(ctx)
 	if len(picks) != 0 {
@@ -257,7 +261,7 @@ func TestSuspenseNamesComeFromPot(t *testing.T) {
 	setPickCount(t, store, ids["ann"], 1)
 	setPickCount(t, store, ids["ben"], 1)
 
-	res, err := engine.Draw(ctx, []string{"in"}, nil)
+	res, err := engine.Draw(ctx, model.TagFilter{MustHave: []string{"in"}})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -282,7 +286,7 @@ func TestLastStraggler(t *testing.T) {
 	setPickCount(t, store, ids["ann"], 1)
 	setPickCount(t, store, ids["ben"], 1)
 
-	res, err := engine.Draw(ctx, nil, nil)
+	res, err := engine.Draw(ctx, model.TagFilter{})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -317,7 +321,7 @@ func TestRevealEligiblePoolSize(t *testing.T) {
 	}
 	setPickCount(t, store, ids["ann"], 1)
 
-	res, err := engine.Draw(ctx, []string{"in"}, nil)
+	res, err := engine.Draw(ctx, model.TagFilter{MustHave: []string{"in"}})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -331,7 +335,7 @@ func TestPickNumbersAreUnique(t *testing.T) {
 	store, engine := setup(t)
 	ctx := context.Background()
 	addEntries(t, store, "ann", "ben")
-	res, err := engine.Draw(ctx, nil, nil)
+	res, err := engine.Draw(ctx, model.TagFilter{})
 	if err != nil {
 		t.Fatalf("draw: %v", err)
 	}
@@ -397,7 +401,7 @@ func TestConcurrentDrawsStayFair(t *testing.T) {
 	ids := addEntries(t, store, "a", "b", "c", "d", "e", "f", "g", "h")
 
 	concurrently(t, k*n, func(int) error {
-		_, err := engine.Draw(ctx, nil, nil)
+		_, err := engine.Draw(ctx, model.TagFilter{})
 		return err
 	})
 
@@ -421,7 +425,7 @@ func TestConcurrentDrawsPickFromPot(t *testing.T) {
 	addEntries(t, store, "a", "b", "c", "d", "e")
 
 	concurrently(t, 23, func(int) error {
-		_, err := engine.Draw(ctx, nil, nil)
+		_, err := engine.Draw(ctx, model.TagFilter{})
 		return err
 	})
 
@@ -450,12 +454,12 @@ func TestConcurrentDrawsWithUndo(t *testing.T) {
 
 	concurrently(t, 40, func(i int) error {
 		if i%3 == 2 {
-			if err := store.UndoLastPick(ctx); err != nil && !errors.Is(err, db.ErrNotFound) {
+			if _, err := store.UndoLastPick(ctx); err != nil && !errors.Is(err, db.ErrNotFound) {
 				return err
 			}
 			return nil
 		}
-		_, err := engine.Draw(ctx, nil, nil)
+		_, err := engine.Draw(ctx, model.TagFilter{})
 		return err
 	})
 

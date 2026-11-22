@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ import (
 
 var ctx = context.Background()
 
-// newTestServer spins up a full HTTP server over the handler package. It runs
+// newTestServer starts a full HTTP server over the handler package. It runs
 // against its own "raffle_handler_test" database (NOT the db package's scratch
 // "raffle_db_test" database, which the db integration tests recreate
 // concurrently under `go test ./...`, nor the app's live "raffle" database).
@@ -88,7 +89,7 @@ func newTestServerWith(t *testing.T, configure func(*handler.Server)) *httptest.
 	}
 	store := db.NewStore(conn)
 	// Isolate each test from any leftover state.
-	if err := store.ResetScores(ctx); err != nil {
+	if err := store.Reset(ctx); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if err := store.ClearEntries(ctx); err != nil {
@@ -232,7 +233,7 @@ func TestEntryLifecycle(t *testing.T) {
 		}
 	})
 
-	// Reset scores then clear entries.
+	// Reset, then clear the Entries.
 	postJSON(t, ts, "/api/reset", "")
 	del := doReq(t, ts, "DELETE", "/api/entries", nil)
 	if del.StatusCode != 200 {
@@ -492,20 +493,97 @@ func TestRevealReplayOnConnect(t *testing.T) {
 	}
 }
 
-// After an Undo or a Reset the last Reveal's Pick is gone, so nothing replays.
-func TestNoRevealReplayAfterUndoOrReset(t *testing.T) {
-	for _, path := range []string{"/api/undo", "/api/reset"} {
-		t.Run(path, func(t *testing.T) {
+// Once the last Reveal's Pick is gone (Undo, Reset, Clear, or deleting the
+// winning Entry), a connecting browser is not sent it.
+func TestNoRevealReplayOncePickIsGone(t *testing.T) {
+	for _, tc := range []struct{ name, method, path string }{
+		{"undo", http.MethodPost, "/api/undo"},
+		{"reset", http.MethodPost, "/api/reset"},
+		{"clear", http.MethodDelete, "/api/entries"},
+		{"delete winner", http.MethodDelete, "/api/entries/{winner}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ts := newTestServer(t)
 			seedVIP(t, ts)
-			postJSON(t, ts, "/api/draw", `{}`)
-			postJSON(t, ts, path, "")
+			var drawn revealEvent
+			if err := json.Unmarshal(postJSON(t, ts, "/api/draw", `{}`), &drawn.Data); err != nil {
+				t.Fatalf("draw response: %v", err)
+			}
+			path := strings.ReplaceAll(tc.path, "{winner}", itoa(drawn.Data.Winner.ID))
+			reqJSON(t, ts, tc.method, path, "")
 			for _, msg := range readEvents(t, dialWS(t, ts), 300*time.Millisecond) {
 				if strings.Contains(string(msg), `"type":"reveal"`) {
-					t.Errorf("replayed a Reveal after %s: %s", path, msg)
+					t.Errorf("replayed a Reveal after %s: %s", tc.name, msg)
 				}
 			}
 		})
+	}
+}
+
+// Deleting an Entry that did not win leaves the Reveal replayable.
+func TestRevealReplaysAfterDeletingAnotherEntry(t *testing.T) {
+	ts := newTestServer(t)
+	aliceID := seedVIP(t, ts)
+	postJSON(t, ts, "/api/draw", `{"must_have":["VIP"]}`) // Alice wins
+	var bob int
+	var entries []model.Entry
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/entries"), &entries); err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	for _, e := range entries {
+		if e.ID != aliceID {
+			bob = e.ID
+		}
+	}
+	reqJSON(t, ts, http.MethodDelete, "/api/entries/"+itoa(bob), "")
+	got := readEvents(t, dialWS(t, ts), 300*time.Millisecond)
+	if len(got) != 1 || !strings.Contains(string(got[0]), `"type":"reveal"`) {
+		t.Errorf("connecting after deleting a non-winner got %s, want the Reveal", got)
+	}
+}
+
+// A browser connecting while a Draw happens sees its Reveal exactly once:
+// either replayed on connect or broadcast after, never missed.
+func TestConnectDuringDrawNeverMissesReveal(t *testing.T) {
+	ts := newTestServer(t)
+	seedVIP(t, ts)
+	for round := 0; round < 20; round++ {
+		const clients = 8
+		conns := make(chan *websocket.Conn, clients)
+		var wg sync.WaitGroup
+		for i := 0; i < clients; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/ws", nil)
+				if err != nil {
+					t.Errorf("dial ws: %v", err)
+					return
+				}
+				conns <- conn
+			}()
+		}
+		var drawn revealEvent
+		if err := json.Unmarshal(postJSON(t, ts, "/api/draw", `{}`), &drawn.Data); err != nil {
+			t.Fatalf("draw response: %v", err)
+		}
+		wg.Wait()
+		close(conns)
+		for conn := range conns {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				for _, msg := range readEvents(t, conn, 150*time.Millisecond) {
+					var evt revealEvent
+					if json.Unmarshal(msg, &evt) == nil && evt.Type == "reveal" && evt.Data.PickID == drawn.Data.PickID {
+						return
+					}
+				}
+				t.Errorf("round %d: a browser connecting during the Draw missed its Reveal", round)
+			}()
+		}
+		wg.Wait()
 	}
 }
 
@@ -663,4 +741,34 @@ func assertJSONBody(t *testing.T, ts *httptest.Server, method, path string, body
 		t.Fatalf("%s %s = %d (%s)", method, path, res.StatusCode, out)
 	}
 	check(out)
+}
+
+// The page carries the Reveal timing the server defines, and the Reel reads
+// it from there instead of keeping its own copy.
+func TestPageCarriesRevealTiming(t *testing.T) {
+	ts := newTestServer(t)
+	page := string(bodyOf(t, ts, "/"))
+	const open = `<script type="application/json" id="reveal-timing">`
+	i := strings.Index(page, open)
+	if i < 0 {
+		t.Fatalf("page has no %s", open)
+	}
+	rest := page[i+len(open):]
+	var got raffle.RevealTiming
+	if err := json.Unmarshal([]byte(rest[:strings.Index(rest, "</script>")]), &got); err != nil {
+		t.Fatalf("reveal timing JSON: %v", err)
+	}
+	if want := (raffle.RevealTiming{SuspenseMS: 2000, LandingMS: 1800, LandingMaxMS: 3000, SettleMS: 420}); got != want {
+		t.Errorf("page timing = %+v, want %+v", got, want)
+	}
+
+	reel := string(bodyOf(t, ts, "/static/js/reel.js"))
+	if !strings.Contains(reel, `"reveal-timing"`) {
+		t.Error("reel.js does not read the page's reveal-timing")
+	}
+	for _, own := range []string{"SUSPENSE_MS = 2", "LANDING_MS = 1", "SETTLE_MS = 4"} {
+		if strings.Contains(reel, own) {
+			t.Errorf("reel.js keeps its own timing constant %q", own)
+		}
+	}
 }

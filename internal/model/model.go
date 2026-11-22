@@ -31,9 +31,17 @@ type Pick struct {
 	PickedAt   time.Time `json:"picked_at"`
 }
 
+// TagFilter is the Tags that limit a Draw: every Must-have Tag is required,
+// and of the any-of Tags an Entry needs at least one. An empty TagFilter
+// limits nothing.
+type TagFilter struct {
+	MustHave []string `json:"must_have,omitempty"`
+	AnyOf    []string `json:"any_of,omitempty"`
+}
+
+// DrawRequest is the body of a Draw: its Tag filter.
 type DrawRequest struct {
-	MustHave []string `json:"must_have"`
-	AnyOf    []string `json:"any_of"`
+	TagFilter
 }
 
 // List is the named set of Entries a raffle draws from, as it crosses between

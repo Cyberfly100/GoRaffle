@@ -54,10 +54,9 @@ func (s *Store) beginPicksTx(ctx context.Context) (*sql.Tx, error) {
 	return tx, nil
 }
 
-// EligiblePool returns the Eligible pool under the tag filter
-// (mustHave = ALL required, anyOf = at least one; both empty = no filter).
-func (p *PicksTx) EligiblePool(ctx context.Context, mustHave, anyOf []string) ([]PoolEntry, error) {
-	return eligiblePool(ctx, p.tx, mustHave, anyOf)
+// EligiblePool returns the Eligible pool under the Tag filter.
+func (p *PicksTx) EligiblePool(ctx context.Context, filter model.TagFilter) ([]PoolEntry, error) {
+	return eligiblePool(ctx, p.tx, filter)
 }
 
 // EntryWithTags returns one Entry with its Tags.
@@ -65,19 +64,25 @@ func (p *PicksTx) EntryWithTags(ctx context.Context, id int) (model.Entry, error
 	return getEntry(ctx, p.tx, id)
 }
 
+// RecordedPick is what recording a Pick produced.
+type RecordedPick struct {
+	PickID     int
+	PickNumber int
+	PickCount  int // the winner's Pick count, this Pick included
+}
+
 // RecordPick inserts a Pick for the Entry and increments its Pick count.
 // The Pick number is one more than the current highest.
-// Returns the new Pick count, the Pick number and the Pick id.
-func (p *PicksTx) RecordPick(ctx context.Context, entryID int) (count, pickNumber, pickID int, err error) {
+func (p *PicksTx) RecordPick(ctx context.Context, entryID int) (RecordedPick, error) {
 	return recordPick(ctx, p.tx, entryID)
 }
 
-func eligiblePool(ctx context.Context, q querier, mustHave, anyOf []string) ([]PoolEntry, error) {
+func eligiblePool(ctx context.Context, q querier, filter model.TagFilter) ([]PoolEntry, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT c.id, c.name, c.pick_count
 		FROM entries c
 		WHERE c.excluded = FALSE`+eligibleWhere+`
-		ORDER BY c.id`, toNullArray(mustHave), toNullArray(anyOf))
+		ORDER BY c.id`, toNullArray(filter.MustHave), toNullArray(filter.AnyOf))
 	if err != nil {
 		return nil, err
 	}
@@ -94,23 +99,21 @@ func eligiblePool(ctx context.Context, q querier, mustHave, anyOf []string) ([]P
 	return out, rows.Err()
 }
 
-func recordPick(ctx context.Context, q querier, entryID int) (int, int, int, error) {
-	var next int
+func recordPick(ctx context.Context, q querier, entryID int) (RecordedPick, error) {
+	var p RecordedPick
 	if err := q.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(pick_number), 0) + 1 FROM picks`).Scan(&next); err != nil {
-		return 0, 0, 0, err
+		`SELECT COALESCE(MAX(pick_number), 0) + 1 FROM picks`).Scan(&p.PickNumber); err != nil {
+		return RecordedPick{}, err
 	}
-
-	var pickID int
 	if err := q.QueryRowContext(ctx,
 		`INSERT INTO picks (entry_id, pick_number) VALUES ($1, $2)
-		 RETURNING id`, entryID, next).Scan(&pickID); err != nil {
-		return 0, 0, 0, err
+		 RETURNING id`, entryID, p.PickNumber).Scan(&p.PickID); err != nil {
+		return RecordedPick{}, err
 	}
-
-	var count int
-	err := q.QueryRowContext(ctx,
+	if err := q.QueryRowContext(ctx,
 		`UPDATE entries SET pick_count = pick_count + 1, updated_at = NOW()
-		 WHERE id = $1 RETURNING pick_count`, entryID).Scan(&count)
-	return count, next, pickID, err
+		 WHERE id = $1 RETURNING pick_count`, entryID).Scan(&p.PickCount); err != nil {
+		return RecordedPick{}, err
+	}
+	return p, nil
 }
