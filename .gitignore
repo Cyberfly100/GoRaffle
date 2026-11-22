@@ -36,3 +36,9 @@ go.work.sum
 # Ignored so a clone on a server keeps using the published image.
 # Template lives in docker-compose.override.yml.example
 docker-compose.override.yml
+
+# Browser tests (dev-only Node tooling)
+node_modules/
+test-results/
+playwright-report/
+browser-tests/.bin/

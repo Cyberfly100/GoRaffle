@@ -179,7 +179,6 @@
       toast(data.error || "Draw failed.");
       return null;
     }
-    window.__pendingWinner = data;
     // When the socket is live, suspense + winner arrive via WS.
     if (!window.Raffle.wsConnected()) fallbackRenderWinner(data);
     return data;
@@ -599,8 +598,10 @@
     if (!winner.classList.contains("is-winner")) return;
     // Prefer the names that flanked the winner on the landing frame so the
     // re-render after the reveal does not swap the neighbouring rows.
-    let aboveNames;
-    let belowNames;
+    // After a page load there was no landing to remember, so fall back to
+    // the List order.
+    let aboveNames = [];
+    let belowNames = [];
     if (reelState.restNeighbors) {
       aboveNames = reelState.restNeighbors.before.filter((n) => n !== winner.textContent);
       belowNames = reelState.restNeighbors.after.filter((n) => n !== winner.textContent);
@@ -1219,7 +1220,13 @@
     }
     const form = new FormData();
     form.append("file", file);
-    const resp = await fetch("/api/import", { method: "POST", body: form });
+    let resp;
+    try {
+      resp = await fetch("/api/import", { method: "POST", body: form });
+    } catch {
+      toast("Could not reach the server.");
+      return;
+    }
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       toast(data.error || "Import failed.");
@@ -1234,7 +1241,7 @@
       }
     }
     const fileInput = $("#import-file");
-    if (input) input.value = "";
+    if (fileInput) fileInput.value = "";
     const nameEl = $("#file-chosen");
     if (nameEl) nameEl.textContent = "No file chosen";
     const btn = $("#import-btn");
@@ -1383,28 +1390,18 @@
   }
 
   /* ---------- List Name ---------- */
+  // The server renders the current List name into the field and the export
+  // links, so nothing needs correcting after load.
   let listNameDebounce = null;
-
-  async function loadListName() {
-    try {
-      const resp = await fetch("/api/list-name");
-      const data = await resp.json();
-      const input = $("#list-name");
-      if (input && data.name) {
-        input.value = data.name;
-        updateExportLinks(data.name);
-      }
-    } catch {
-      // Ignore errors, keep default
-    }
-  }
 
   function updateExportLinks(name) {
     const safeName = name.trim() || "raffle";
-    const jsonLink = document.querySelector('a[href="/api/export?format=json"]');
-    const csvLink = document.querySelector('a[href="/api/export?format=csv"]');
-    if (jsonLink) jsonLink.href = `/api/export?format=json&name=${encodeURIComponent(safeName)}`;
-    if (csvLink) csvLink.href = `/api/export?format=csv&name=${encodeURIComponent(safeName)}`;
+    // Found by a stable identity, not by their address, so every rename
+    // (not just the first) rewrites them.
+    for (const link of $$("a[data-export-format]")) {
+      const format = encodeURIComponent(link.dataset.exportFormat);
+      link.href = `/api/export?format=${format}&name=${encodeURIComponent(safeName)}`;
+    }
   }
 
   function saveListName(name) {
@@ -1447,7 +1444,6 @@
     bindReelToggle();
     dressVerticalReel();
     bindListName();
-    loadListName();
     // #new-name lives inside the swapped table partial, so its Enter
     // handling is delegated (element-bound listeners are lost on swap).
     document.addEventListener("keydown", (e) => {

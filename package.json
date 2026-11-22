@@ -1,0 +1,11 @@
+{
+  "name": "goraffle-browser-tests",
+  "private": true,
+  "description": "Dev-only tooling: Playwright browser tests. Not part of the Go build or the docker image.",
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1"
+  }
+}

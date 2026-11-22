@@ -11,6 +11,26 @@ require a rebuild — including the docker image — to be visible).
 - Lint: `go vet ./... && gofmt -l .` (must report nothing; fix with `gofmt -w`)
 - JS syntax check: `node --check static/js/app.js static/js/ws.js`
 - E2E smoke test: `bash scripts/e2e.sh`
+- Browser tests: `npm install && npx playwright install chromium` once, then `npx playwright test`
+  (one file: `npx playwright test browser-tests/import.spec.js`; one test: `-g "<title>"`)
+
+## Browser test notes
+
+- Playwright drives headless Chromium against a freshly built binary
+  (`browser-tests/serve.sh`, started by `playwright.config.js`) on port **8598**,
+  using its own database `raffle_browser_test`, created on first use. It never
+  reuses a server that's already running.
+- Requires the compose Postgres at `localhost:5432`, like the E2E test.
+- Import `test`/`expect` from `browser-tests/fixtures.js`, not `@playwright/test`.
+  The fixture resets the app over HTTP before each test and fails a test on any
+  uncaught page error.
+- Set up state through the HTTP API (`seedEntries`, `setListName`, `resetApp` in
+  fixtures.js), never SQL. Host actions and reads live in `browser-tests/helpers.js`.
+- Assert what the host sees (toasts, field values, links, Reel cells). Never call
+  app functions or read private state.
+- Tests run one at a time (`workers: 1`), because they share a database.
+- The tooling (`package.json`, `node_modules/`, `browser-tests/`) stays out of the
+  Go build and the docker image.
 
 ## E2E notes
 

@@ -6,3 +6,11 @@ Dockerfile
 docker-compose.yml
 pics
 raffle.py
+# Dev-only browser test tooling never reaches the image
+node_modules
+test-results
+playwright-report
+browser-tests
+package.json
+package-lock.json
+playwright.config.js
