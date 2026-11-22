@@ -63,17 +63,17 @@ func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := "Removed last entry: " + last.EntryName
-	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionResult}, Info: info})
+	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionLastPick}, Info: info})
 
 	writeJSON(w, http.StatusOK, map[string]string{"info": info})
 }
 
-func (s *Server) resetScores(w http.ResponseWriter, r *http.Request) {
-	if err := s.store.ResetScores(r.Context()); err != nil {
-		slogError(w, err, "reset scores")
+func (s *Server) reset(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.Reset(r.Context()); err != nil {
+		slogError(w, err, "reset")
 		return
 	}
-	s.changed(RegionTable, RegionHistory, RegionResult)
+	s.changed(RegionTable, RegionHistory, RegionLastPick)
 	writeJSON(w, http.StatusOK, map[string]bool{"reset": true})
 }
 

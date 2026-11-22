@@ -18,7 +18,7 @@
 //   reel.setOrientation(o)   switch layout; refused (false) while busy
 //   reel.orientation()
 //   reel.dress()             re-dress the resting Reel after #result was
-//                            re-rendered (the vertical drum's neighbour rows)
+//                            re-rendered (the vertical Reel's neighbour rows)
 //
 // Phases: idle -> windup -> cruising -> landing -> idle, or idle -> reduced
 // -> idle with reduced motion. A Reveal that arrives while busy is queued and
@@ -62,8 +62,8 @@ export function createReel({ orientation = "horizontal" } = {}) {
   let raf = null;
   let speed = { value: 0, at: 0 };
   // Geometry of the running belt.
-  let spin = null; // { seq, cellSize, base, headCount }
-  // The names flanking the last landed winner, kept for the resting drum.
+  let belt = null; // { seq, cellSize, base, headCount }
+  // The names flanking the last landed winner, kept for the resting Reel.
   let restNeighbours = null;
   let lastCycle = null;
   let listNames = null;
@@ -111,7 +111,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     current = item;
     const { reel, track, label, sub } = parts();
     if (!reel || !track) {
-      // Nothing to spin on: reveal the winner without motion.
+      // No Reel to run: reveal the winner without motion.
       phase = "reduced";
       later(landCurrent, 0);
       return;
@@ -137,10 +137,10 @@ export function createReel({ orientation = "horizontal" } = {}) {
     const visibleCells = Math.max(2, Math.ceil(viewport / cellSize) + 1);
     const seq = spreadSequence(names, visibleCells);
     const loopLen = seq.length * cellSize;
-    const spinDist = (CRUISE_SPEED * WINDUP_MS) / 2;
+    const windupDist = (CRUISE_SPEED * WINDUP_MS) / 2;
 
     // Keep the name that is already on screen (the resting winner, not a
-    // dressed drum row) plus the rows flanking it, so the spin's first frame
+    // dressed Reel row) plus the rows flanking it, so the Suspense's first frame
     // is identical to the resting one and the belt grows out of it.
     const shown = track.querySelector(".reel-cell.is-winner") || track.querySelector(".reel-cell");
     const leadName = shown ? shown.textContent : "";
@@ -202,13 +202,13 @@ export function createReel({ orientation = "horizontal" } = {}) {
     const headCount = 2 + beforeCells.length + afterCells.length;
     const headEnd = track.children[headCount - 1].getBoundingClientRect()[ax.rectEnd];
     const base = headEnd - track.getBoundingClientRect()[ax.rectStart];
-    spin = { seq, cellSize, base, headCount };
+    belt = { seq, cellSize, base, headCount };
     lastCycle = seq;
 
     // The strip travels one sequence per cycle, so it must be at least one
     // sequence longer than the window, and cover the wind-up outright when
     // that runs further than a single loop (short Pots).
-    const copies = Math.max(2, Math.ceil((Math.max(loopLen, spinDist - base) + viewport) / loopLen));
+    const copies = Math.max(2, Math.ceil((Math.max(loopLen, windupDist - base) + viewport) / loopLen));
     for (let c = 0; c < copies; c++) {
       for (const n of seq) track.appendChild(cell(n, "fade-in"));
     }
@@ -224,7 +224,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
       track.style.setProperty("--cruise-dur", (cruiseMs / 1000).toFixed(3) + "s");
       track.style.transitionDuration = WINDUP_MS + "ms";
       void track.offsetWidth;
-      track.style.transform = `${ax.translate}(${-spinDist}px)`;
+      track.style.transform = `${ax.translate}(${-windupDist}px)`;
       const windupStart = performance.now();
       followMotion(track, cellSize);
       // Hand over when the wind-up truly ends. A bare timer can fire while
@@ -236,7 +236,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
         // Enter the loop at the phase matching where the wind-up ended, via
         // a negative delay, so neither position nor speed jumps. Advance by
         // the frame transitionend arrives late, or the belt loses travel.
-        const rel = spinDist >= base ? (spinDist - base) % loopLen : 0;
+        const rel = windupDist >= base ? (windupDist - base) % loopLen : 0;
         const relMs = (rel / loopLen) * cruiseMs;
         const lost = Math.max(0, performance.now() - (windupStart + WINDUP_MS));
         track.style.transitionDuration = "0ms";
@@ -256,7 +256,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     clearTimers();
     const winner = current.winner;
     const { reel, track } = parts();
-    if (phase === "reduced" || !spin || !reel || !track) {
+    if (phase === "reduced" || !belt || !reel || !track) {
       showResting(winner);
       finish();
       return;
@@ -273,7 +273,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     // Hand over from the belt's real speed (it may still be winding up).
     const fresh = performance.now() - speed.at < 120;
     const v0 = Math.max(MIN_LANDING_SPEED, Math.min(CRUISE_SPEED, fresh ? speed.value : CRUISE_SPEED));
-    const { seq, cellSize, base, headCount } = spin;
+    const { seq, cellSize, base, headCount } = belt;
     const strip = [...track.children].slice(headCount).map((c) => c.textContent);
     const plan = planLanding({
       axis: ax,
@@ -313,7 +313,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     clearTimers();
     phase = "idle";
     current = null;
-    spin = null;
+    belt = null;
     if (queue.length) {
       play(queue.shift());
       return;
@@ -344,7 +344,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
   }
 
   // The vertical window is tall enough to show rows around the resting
-  // winner; a lone cell would end the drum. Dimmed neighbours are added
+  // winner; a lone cell would end the Reel. Dimmed neighbours are added
   // symmetrically, from the landing, the last cycle, or the List.
   function dress() {
     if (!busy()) dressResting();
@@ -492,7 +492,7 @@ function measureCell(names, viewport, vertical) {
 
 // Deterministic pass: no name repeats within `gap` cells, so the window never
 // shows the same contender twice. Built from the server's name order, so every
-// browser spins identically.
+// browser runs the Reel identically.
 function spreadSequence(names, gap) {
   const seq = [];
   for (const n of names) {

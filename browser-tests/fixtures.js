@@ -1,6 +1,6 @@
 // Shared fixtures for every browser test. Import `test` and `expect` from
 // here, never from @playwright/test directly, so each test gets:
-//   - a reset app (scores, history, entries and List name) before it starts;
+//   - a reset app (Pick counts, History, entries and List name) before it starts;
 //   - a failure on any uncaught page error (the suite-wide safety net).
 // Test state is set up through the app's own HTTP interface, never SQL.
 const base = require("@playwright/test");

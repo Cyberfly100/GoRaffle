@@ -67,7 +67,7 @@ func (s *Server) Routes() http.Handler {
 	// API — draw / history
 	mux.HandleFunc("POST /api/draw", s.draw)
 	mux.HandleFunc("POST /api/undo", s.undo)
-	mux.HandleFunc("POST /api/reset", s.resetScores)
+	mux.HandleFunc("POST /api/reset", s.reset)
 	mux.HandleFunc("GET /api/history", s.history)
 
 	// API — import / export

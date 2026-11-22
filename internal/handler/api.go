@@ -85,7 +85,7 @@ func (s *Server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name != nil {
 		// History and the result show Entry names.
-		s.changed(RegionTable, RegionHistory, RegionResult)
+		s.changed(RegionTable, RegionHistory, RegionLastPick)
 	} else {
 		s.changed(RegionTable)
 	}
@@ -102,7 +102,7 @@ func (s *Server) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		handleNotFound(w, err)
 		return
 	}
-	s.changed(RegionTable, RegionHistory, RegionResult)
+	s.changed(RegionTable, RegionHistory, RegionLastPick)
 	writeJSON(w, http.StatusOK, map[string]int{"id": id})
 }
 
@@ -111,7 +111,7 @@ func (s *Server) clearEntries(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "clear entries")
 		return
 	}
-	s.changed(RegionTable, RegionHistory, RegionResult, RegionTagPopover)
+	s.changed(RegionTable, RegionHistory, RegionLastPick, RegionTagPopover)
 	writeJSON(w, http.StatusOK, map[string]bool{"cleared": true})
 }
 

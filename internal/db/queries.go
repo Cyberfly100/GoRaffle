@@ -456,9 +456,9 @@ func boolOr(b *bool, def bool) bool {
 	return def
 }
 
-// ResetScores zeroes all counts and clears pick history in a transaction
-// serialized against Draws and Undo.
-func (s *Store) ResetScores(ctx context.Context) error {
+// Reset clears all Picks and sets every Pick count back to zero, in a
+// transaction serialized against Draws and Undo.
+func (s *Store) Reset(ctx context.Context) error {
 	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err

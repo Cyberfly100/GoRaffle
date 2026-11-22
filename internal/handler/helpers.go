@@ -40,7 +40,7 @@ type Region string
 const (
 	RegionTable      Region = "table"
 	RegionHistory    Region = "history"
-	RegionResult     Region = "result"
+	RegionLastPick   Region = "result" // the last Pick on the Reel (#result)
 	RegionFilter     Region = "filter"
 	RegionTagPopover Region = "tag-popover"
 	RegionListName   Region = "list-name"

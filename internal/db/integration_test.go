@@ -78,7 +78,7 @@ func setup(t *testing.T) (*db.Store, *raffle.Engine) {
 	t.Cleanup(func() { conn.Close() })
 	store := db.NewStore(conn)
 	engine := raffle.NewEngine(store)
-	if err := store.ResetScores(context.Background()); err != nil {
+	if err := store.Reset(context.Background()); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if err := store.ClearEntries(context.Background()); err != nil {
@@ -160,7 +160,7 @@ func TestDrawTagFilterOR(t *testing.T) {
 	_ = store.SetEntryTags(ctx, nil, bob.ID, []string{"VIP"})
 	winnerSet := map[string]bool{}
 	for i := 0; i < 30; i++ {
-		store.ResetScores(ctx) // zero counts so everyone is always eligible
+		store.Reset(ctx) // zero counts so everyone is always eligible
 		res, err := engine.Draw(ctx, nil, []string{"VIP"})
 		if err != nil {
 			t.Fatalf("draw %d: %v", i, err)

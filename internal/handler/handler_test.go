@@ -29,7 +29,7 @@ import (
 
 var ctx = context.Background()
 
-// newTestServer spins up a full HTTP server over the handler package. It runs
+// newTestServer starts a full HTTP server over the handler package. It runs
 // against its own "raffle_handler_test" database (NOT the db package's scratch
 // "raffle_db_test" database, which the db integration tests recreate
 // concurrently under `go test ./...`, nor the app's live "raffle" database).
@@ -89,7 +89,7 @@ func newTestServerWith(t *testing.T, configure func(*handler.Server)) *httptest.
 	}
 	store := db.NewStore(conn)
 	// Isolate each test from any leftover state.
-	if err := store.ResetScores(ctx); err != nil {
+	if err := store.Reset(ctx); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
 	if err := store.ClearEntries(ctx); err != nil {
@@ -233,7 +233,7 @@ func TestEntryLifecycle(t *testing.T) {
 		}
 	})
 
-	// Reset scores then clear entries.
+	// Reset, then clear the Entries.
 	postJSON(t, ts, "/api/reset", "")
 	del := doReq(t, ts, "DELETE", "/api/entries", nil)
 	if del.StatusCode != 200 {

@@ -181,7 +181,7 @@ async function pickCountsInTable(page) {
 }
 
 // True if the Reel's belt does not move for `ms`. A re-rendered result (a
-// new belt in place) is not motion; a spin is.
+// new belt in place) is not motion; a running Reel is.
 async function reelStaysStill(page, ms) {
   return page.evaluate(
     (ms) =>
