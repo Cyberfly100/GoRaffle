@@ -22,6 +22,14 @@ _Avoid_: Category, group
 An Entry the host has taken out of every Draw. It stays on the List, keeps its Pick count, and can be brought back.
 _Avoid_: Disabled, inactive, hidden
 
+**List file**:
+A JSON file holding a List's name, its Entries and its History: the one format a List is exported as and restored from.
+_Avoid_: Backup, export file, CSV (CSV is a legacy import format without History)
+
+**Import**:
+Replacing the List's name, Entries and History with the contents of a List file. It never merges with what was there.
+_Avoid_: Merge, upload, restore
+
 ### Drawing
 
 **Tag filter**:
