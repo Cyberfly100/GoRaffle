@@ -27,8 +27,7 @@ type Event struct {
 }
 
 const (
-	EventSuspense = "suspense"
-	EventWinner   = "winner"
+	EventReveal = "reveal"
 	// EventChanged is the one change event: it names the page regions a
 	// change made stale, and browsers refresh exactly those.
 	EventChanged = "changed"

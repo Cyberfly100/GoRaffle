@@ -81,6 +81,11 @@ func NewClient(hub *Hub, conn *websocket.Conn) *Client {
 	return &Client{hub: hub, conn: conn, send: make(chan []byte, 64)}
 }
 
+// Send queues a message for this client alone. Call it before Register.
+func (c *Client) Send(msg []byte) {
+	c.send <- msg
+}
+
 const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second

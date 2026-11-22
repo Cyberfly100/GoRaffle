@@ -48,7 +48,7 @@ func changesSeen(t *testing.T, conn *websocket.Conn) []changedEvent {
 			t.Fatalf("event JSON: %v (%s)", err, msg)
 		}
 		switch evt.Type {
-		case "suspense", "winner", "reveal":
+		case "reveal":
 			continue
 		case "changed":
 			var c changedEvent

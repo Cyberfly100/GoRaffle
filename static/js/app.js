@@ -4,7 +4,6 @@ import * as ws from "./ws.js";
 import { createReel } from "./reel.js";
 import { createRegions } from "./regions.js";
 import { bindCollapsible } from "./collapsible.js";
-import { confettiBurst } from "./confetti.js";
 import { audioCtx, bindSoundToggle, followReel, soundOn } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -77,6 +76,8 @@ const regions = createRegions({ reel });
 regions.define("table", {
   url: "/partials/table",
   target: "#entry-table",
+  // Its Pick counts would show the winner before the Reel lands.
+  waitForIdle: true,
   // Replacing the section rebuilds its scrollports and drops a focused
   // field, so the table neither jumps nor steals the caret mid-edit.
   keep: { scroll: [".rows-scroll", ".table"], focus: true, fitHeight: syncNameFieldHeights },
@@ -93,6 +94,8 @@ regions.define("filter", {
 regions.define("history", {
   url: "/partials/history",
   target: "#history",
+  // Would show the winner before the Reel lands.
+  waitForIdle: true,
 });
 
 regions.define("result", {
@@ -137,12 +140,9 @@ function refreshIfNoWS() {
 
 
 /* ---------- Draw ---------- */
-// Draw is disabled from the click until the Reel is idle again (or the
-// request fails), and whenever the Reel is busy with anyone's Reveal.
+// Draw is disabled from the click until the Reveal starts, then while the
+// Reel is busy with anyone's Reveal.
 let drawPending = false;
-let drawPendingTimer = null;
-// If no Suspense ever reaches this browser, don't leave Draw stuck.
-const DRAW_PENDING_MS = 4000;
 
 function syncDrawBtn() {
   const btn = $("#draw-btn");
@@ -151,13 +151,6 @@ function syncDrawBtn() {
 
 function setDrawPending(pending) {
   drawPending = pending;
-  clearTimeout(drawPendingTimer);
-  if (pending) {
-    drawPendingTimer = setTimeout(() => {
-      drawPending = false;
-      syncDrawBtn();
-    }, DRAW_PENDING_MS);
-  }
   syncDrawBtn();
 }
 
@@ -190,26 +183,29 @@ async function doDraw() {
     setDrawPending(false);
     return null;
   }
-  // When the socket is live, Suspense + winner arrive via WS and the Reel
-  // re-enables Draw once it is idle.
-  if (!ws.connected()) {
-    fallbackRenderWinner(data);
-    setDrawPending(false);
-  }
+  // The response is the same Reveal the websocket carries: play whichever
+  // arrives first, so the Draw works without a websocket too.
+  playReveal(data);
+  setDrawPending(false);
   return data;
 }
 
-function fallbackRenderWinner(data) {
-  regions.refreshAll();
-  if (data?.winner?.name) {
-    toast(`The winner is ${data.winner.name}`);
-    // No socket means no Reel, but this is still the moment of reveal.
-    confettiBurst($("#result .reel") || $("#result"));
-  }
+/* ---------- Reveal ---------- */
+// Each Reveal plays once in this browser, identified by its Pick id, however
+// many times it arrives (HTTP response, websocket event, replay on connect).
+const playedPicks = new Set();
+
+function playReveal(reveal) {
+  const winner = reveal && reveal.winner && reveal.winner.name;
+  if (!winner || playedPicks.has(reveal.pick_id)) return;
+  playedPicks.add(reveal.pick_id);
+  reel.reveal(reveal.suspense_names, winner);
+  syncDrawBtn();
 }
 
 reel.onIdle(() => {
   setDrawPending(false);
+  // Applies the refreshes held back during the Reveal, and shows its Pick.
   regions.refreshAll();
 });
 
@@ -606,11 +602,7 @@ function updateEligibility() {
 
 /* ---------- WS events ---------- */
 function bindWS() {
-  ws.on("suspense", (data) => {
-    reel.suspense(data && data.names);
-    syncDrawBtn();
-  });
-  ws.on("winner", (data) => reel.land(data && data.winner && data.winner.name));
+  ws.on("reveal", playReveal);
   ws.on("changed", (data) => regions.refresh(data?.regions || regions.names()));
 }
 
