@@ -348,6 +348,11 @@ func TestImportSupportedShapes(t *testing.T) {
 		body        string
 		want        listSnapshot
 	}{
+		"older JSON export without picks": {
+			"application/json",
+			`{"list_name":"Old Backup","entries":[{"name":"Ann","pick_count":3,"excluded":false,"tags":["VIP"]}]}`,
+			listSnapshot{Name: "Old Backup", Entries: []listEntry{{Name: "Ann", PickCount: 3, Tags: []string{"VIP"}}}},
+		},
 		"legacy contestants key": {
 			"application/json",
 			`{"list_name":"Old Backup","contestants":[{"name":"Zed","pick_count":4,"excluded":true,"tags":["Alumni"]}]}`,
