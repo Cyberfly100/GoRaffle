@@ -74,20 +74,32 @@ followReel(reel);
 // "changed" event names the stale ones.
 const regions = createRegions({ reel });
 
+// The Tag filter lives in this browser only. The table and the filter bar are
+// rendered for it, so every refresh of them carries it.
+const filterState = { must_have: [], any_of: [] };
+
+function filterQuery() {
+  const q = new URLSearchParams();
+  for (const zone of ["must_have", "any_of"]) {
+    for (const tag of filterState[zone]) q.append(zone, tag);
+  }
+  const s = q.toString();
+  return s ? "?" + s : "";
+}
+
 regions.define("table", {
-  url: "/partials/table",
+  // The server marks each row as in the Eligible pool and in the Pot.
+  url: () => "/partials/table" + filterQuery(),
   target: "#entry-table",
   // Replacing the section rebuilds its scrollports and drops a focused
   // field, so the table neither jumps nor steals the caret mid-edit.
   keep: { scroll: [".rows-scroll", ".table"], focus: true, fitHeight: syncNameFieldHeights },
-  after: updateEligibility,
 });
 
 regions.define("filter", {
-  url: "/partials/filter",
+  // The server renders the selected Tags' chips.
+  url: () => "/partials/filter" + filterQuery(),
   target: "#filter-bar",
-  // The selected Tags live in the browser; put the chips back.
-  after: renderFilterZones,
 });
 
 regions.define("history", {
@@ -428,46 +440,14 @@ function bindTagDialog() {
 }
 
 /* ---------- Filter ---------- */
-// Selected tags live client-side only; the zones render as bubbles + a "+"
-// that opens the picker. State survives partial refreshes (refiltered on swap).
-const filterState = { must_have: [], any_of: [] };
+// Changing the Tag filter re-renders the filter bar and the table for it.
 let filterPickerZone = "must_have";
 
-// Palette classes are assigned server-side (template tagClass); reuse the
-// rendered chip's class so the FNV hash lives in one place.
-function tagClass(name) {
-  const chip = $(`#filter-picker [data-tag="${name.replace(/"/g, '\\"')}"]`);
-  if (chip) {
-    const tc = [...chip.classList].find((c) => c.startsWith("tc-"));
-    if (tc) return tc;
-  }
-  return "tc-0";
-}
-
-function renderFilterZones() {
-  for (const zone of ["must_have", "any_of"]) {
-    const holder = $(`#filter-bar [data-zone="${zone}"]`);
-    if (!holder) continue;
-    holder.replaceChildren();
-    for (const tag of filterState[zone]) {
-      const bubble = document.createElement("span");
-      bubble.className = "tag-bubble " + tagClass(tag);
-      bubble.dataset.tag = tag;
-      const x = document.createElement("button");
-      x.className = "tag-x";
-      x.dataset.action = "remove-filter-tag";
-      x.dataset.zone = zone;
-      x.dataset.tag = tag;
-      x.title = "Remove tag";
-      x.textContent = "×";
-      bubble.append(tag, x);
-      holder.appendChild(bubble);
-    }
-  }
+function filterChanged() {
   const total = filterState.must_have.length + filterState.any_of.length;
   const badge = $("#filter-count");
   if (badge) badge.textContent = total > 0 ? String(total) : "";
-  updateEligibility();
+  regions.refresh(["filter", "table"]);
 }
 
 function openFilterPicker(zone) {
@@ -481,19 +461,19 @@ function pickFilterTag(tag) {
   if (!filterState[filterPickerZone].includes(tag)) {
     filterState[filterPickerZone].push(tag);
   }
-  renderFilterZones();
   $("#filter-picker")?.close();
+  filterChanged();
 }
 
 function removeFilterTag(zone, tag) {
   filterState[zone] = filterState[zone].filter((t) => t !== tag);
-  renderFilterZones();
+  filterChanged();
 }
 
 function clearFilter() {
   filterState.must_have = [];
   filterState.any_of = [];
-  renderFilterZones();
+  filterChanged();
 }
 
 function bindFilter() {
@@ -509,7 +489,6 @@ function bindFilter() {
     if (e.target.closest("#clear-filter")) clearFilter();
     if (e.target.closest("#filter-picker-close")) $("#filter-picker")?.close();
   });
-  renderFilterZones();
 }
 
 /* ---------- Undo / Reset ---------- */
@@ -584,25 +563,6 @@ async function doClearEntries() {
     toast(err.message);
   }
 }
-
-/* ---------- Eligibility visual ---------- */
-function matchesFilter(tags) {
-  const has = [...tags];
-  if (filterState.must_have.length && !filterState.must_have.every((t) => has.includes(t))) return false;
-  if (filterState.any_of.length && !filterState.any_of.some((t) => has.includes(t))) return false;
-  return true;
-}
-
-function updateEligibility() {
-  for (const row of $$("#entry-table-body [data-id]")) {
-    const excluded = row.querySelector('input[data-field="excluded"]')?.checked;
-    const tags = $$(".tag-bubble[data-tag]", row).map((b) => b.dataset.tag);
-    const ineligible = !!excluded || !matchesFilter(tags);
-    row.classList.toggle("row-ineligible", ineligible);
-    row.title = ineligible ? "Not eligible for the next draw" : "";
-  }
-}
-
 
 /* ---------- WS events ---------- */
 function bindWS() {
