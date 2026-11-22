@@ -113,13 +113,20 @@ export_json=$(curl -s "$base/api/export?format=json")
 check "export json has entries" "13" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["entries"]))' 2>/dev/null || echo ERR)"
 check "export json has list_name" "Entries" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
 check "export json has an empty picks key" "0" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["picks"]))' 2>/dev/null || echo ERR)"
-curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"Bob","pick_count":2,"excluded":false,"tags":["Newbie"]},{"name":"Carol"}]}' >/dev/null
+
+echo "=== import replaces ==="
+# Importing a List file replaces the List: only the file's Entries remain.
+curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"list_name":"Fresh List","entries":[{"name":"Bob","pick_count":2,"excluded":false,"tags":["Newbie"]},{"name":"Carol"}]}' >/dev/null
 cs2=$(curl -s "$base/api/entries")
-check "import added 2 entries (15 total)" "15" "$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
+check "import replaced the list (2 entries)" "2" "$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
 bob=$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(next(c["pick_count"] for c in json.load(sys.stdin) if c["name"]=="Bob"))' 2>/dev/null)
 check "import set Bob pick_count" "2" "$bob"
 bobtags=$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(",".join(next(c["tags"] for c in json.load(sys.stdin) if c["name"]=="Bob")))' 2>/dev/null)
 check "import set Bob tags" "Newbie" "$bobtags"
+check "import set the file's list name" "Fresh List" "$(curl -s "$base/api/list-name" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
+# A file without a list name resets it to Entries.
+curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"Bob","pick_count":2,"excluded":false,"tags":["Newbie"]},{"name":"Carol"}]}' >/dev/null
+check "import without a name resets it to Entries" "Entries" "$(curl -s "$base/api/list-name" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
 
 echo "=== removed exports ==="
 check "csv list export is gone" "400" "$(curl -s -o /dev/null -w "%{http_code}" "$base/api/export?format=csv")"
@@ -136,6 +143,27 @@ check "export pick names the winner" "$winner2" "$(printf '%s' "$export2" | pyth
 check "export pick is number 1" "1" "$(printf '%s' "$export2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["picks"][0]["pick_number"])' 2>/dev/null || echo ERR)"
 check "export pick time is RFC3339" "ok" "$(printf '%s' "$export2" | python3 -c 'import sys,json,datetime;datetime.datetime.strptime(json.load(sys.stdin)["picks"][0]["picked_at"],"%Y-%m-%dT%H:%M:%S%z");print("ok")' 2>/dev/null || echo ERR)"
 
+echo "=== import restores the History ==="
+# Importing the exported file brings the Pick back with it.
+printf '%s' "$export2" > /tmp/opencode/raffle_hist.json
+curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' --data-binary @/tmp/opencode/raffle_hist.json >/dev/null
+hist2=$(curl -s "$base/api/history")
+check "import restored the pick" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
+check "restored pick names the winner" "$winner2" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["entry_name"])' 2>/dev/null || echo ERR)"
+check "restored pick is number 1" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["pick_number"])' 2>/dev/null || echo ERR)"
+
+echo "=== JSON round-trip ==="
+# The List file is a complete backup: export, import it back (the Import
+# replaces whatever is there), export again: byte for byte the same file.
+# The import goes through the multipart upload path, as the dialog sends it.
+curl -s "$base/api/export?format=json" > /tmp/opencode/raffle_rt1.json
+curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt1.json" >/dev/null
+curl -s "$base/api/export?format=json" > /tmp/opencode/raffle_rt2.json
+check "export-import-export is byte-identical" "same" "$(cmp -s /tmp/opencode/raffle_rt1.json /tmp/opencode/raffle_rt2.json && echo same || echo differs)"
+check "round-trip kept the entry count" "2" "$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
+# restore the default so the app starts clean for the user later
+curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"Entries"}' >/dev/null
+
 echo "=== list name ==="
 curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"My List"}' >/dev/null
 ln2=$(curl -s "$base/api/list-name")
@@ -146,17 +174,7 @@ imp=$(curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d 
 check "import response carries list_name" "Swapped" "$(printf '%s' "$imp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
 ln3=$(curl -s "$base/api/list-name")
 check "import set list name" "Swapped" "$(printf '%s' "$ln3" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
-
-echo "=== JSON round-trip ==="
-# Export the current state, clear, re-import: the List must come back whole.
-curl -s "$base/api/export?format=json" > /tmp/opencode/raffle_rt.json
-before=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
-curl -s -X DELETE "$base/api/entries" >/dev/null
-curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt.json" >/dev/null
-after=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
-check "json round-trip preserves entry count" "$before" "$after"
-# restore the default so the app starts clean for the user later
-curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"Entries"}' >/dev/null
+check "import replaced the list (1 entry)" "1" "$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
 
 echo "=== reset ==="
 curl -s -X POST "$base/api/reset" >/dev/null
