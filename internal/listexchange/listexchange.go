@@ -7,7 +7,10 @@
 //
 // Supported import shapes:
 //
-//   - JSON object: {"list_name": "...", "entries": [{name, pick_count, excluded, tags}]}
+//   - JSON object: {"list_name": "...", "entries": [{name, pick_count, excluded, tags}],
+//     "picks": [{entry_name, pick_number, picked_at}]} where picked_at is a
+//     RFC 3339 time. A Pick with a missing or unparseable time makes the
+//     whole file invalid.
 //   - JSON object with the legacy "contestants" key instead of "entries"
 //   - JSON array of names: ["a", "b"]
 //   - JSON array of entry objects: [{"name": "a"}, ...]
@@ -133,13 +136,18 @@ func decodeJSON(body []byte) (model.List, error) {
 		ListName string      `json:"list_name"`
 		Entries  []jsonEntry `json:"entries"`
 		Legacy   []jsonEntry `json:"contestants"`
+		Picks    []jsonPick  `json:"picks"`
 	}
 	if err := json.Unmarshal(body, &obj); err == nil {
 		rows := append(obj.Entries, obj.Legacy...)
 		if len(rows) == 0 {
 			return model.List{}, errors.New(`JSON contained no entries under "entries" (or legacy "contestants")`)
 		}
-		return model.List{Name: obj.ListName, Entries: fromJSON(rows)}, nil
+		picks, err := decodePicks(obj.Picks)
+		if err != nil {
+			return model.List{}, err
+		}
+		return model.List{Name: obj.ListName, Entries: fromJSON(rows), Picks: picks}, nil
 	}
 	var names []string
 	if err := json.Unmarshal(body, &names); err == nil {
@@ -168,6 +176,26 @@ func fromJSON(rows []jsonEntry) []model.ListEntry {
 		out = append(out, model.ListEntry(r))
 	}
 	return out
+}
+
+// decodePicks turns the JSON Picks into the List's History. Every Pick
+// must name its Entry and carry a parseable RFC 3339 time: the History is
+// never silently reordered or dropped.
+func decodePicks(rows []jsonPick) ([]model.ListPick, error) {
+	out := make([]model.ListPick, 0, len(rows))
+	for i, r := range rows {
+		name := strings.TrimSpace(r.EntryName)
+		at := strings.TrimSpace(r.PickedAt)
+		if at == "" {
+			return nil, fmt.Errorf("pick %d (%q) is missing picked_at", i+1, name)
+		}
+		t, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return nil, fmt.Errorf("pick %d (%q) has an invalid picked_at %q (want RFC 3339, e.g. 2026-11-23T12:00:00Z)", i+1, name, at)
+		}
+		out = append(out, model.ListPick{EntryName: name, PickedAt: t, PickNumber: r.PickNumber})
+	}
+	return out, nil
 }
 
 func decodeCSV(body []byte) (model.List, error) {

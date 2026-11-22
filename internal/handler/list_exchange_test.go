@@ -47,6 +47,27 @@ func readList(t *testing.T, ts *httptest.Server) listSnapshot {
 	return listSnapshot{Name: name.Name, Entries: entries}
 }
 
+// pickJSON is one Pick as the history endpoint reports it.
+type pickJSON struct {
+	EntryName  string `json:"entry_name"`
+	PickNumber int    `json:"pick_number"`
+	PickedAt   string `json:"picked_at"`
+}
+
+// readHistory returns the History oldest first (the order it was picked
+// in), as the history endpoint reports it (the endpoint lists newest first).
+func readHistory(t *testing.T, ts *httptest.Server) []pickJSON {
+	t.Helper()
+	var picks []pickJSON
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/history"), &picks); err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	for i, j := 0, len(picks)-1; i < j; i, j = i+1, j-1 {
+		picks[i], picks[j] = picks[j], picks[i]
+	}
+	return picks
+}
+
 // seedList builds a List through the entry, tag and List name endpoints.
 func seedList(t *testing.T, ts *httptest.Server, listName string, entries []listEntry) {
 	t.Helper()
@@ -406,6 +427,38 @@ func TestImportMergesOnlySuppliedFields(t *testing.T) {
 			{Name: "Cy", Tags: []string{}},
 		},
 	})
+}
+
+// The History is part of the List file: a Pick with a missing or
+// unparseable time makes the whole file invalid, and nothing changes —
+// not the Entries, not the List name, not the History.
+func TestImportRejectsPickWithInvalidTime(t *testing.T) {
+	cases := map[string]string{
+		"missing picked_at": `{"list_name":"Bad","entries":[{"name":"Ann"}],"picks":[
+			{"entry_name":"Ann","pick_number":1}]}`,
+		"unparseable picked_at": `{"list_name":"Bad","entries":[{"name":"Ann"}],"picks":[
+			{"entry_name":"Ann","pick_number":1,"picked_at":"not a time"}]}`,
+	}
+	for label, body := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			seedList(t, ts, "Untouched", []listEntry{{Name: "Ann", PickCount: 1, Tags: []string{}}})
+			postJSON(t, ts, "/api/draw", `{}`) // Ann wins: the History is non-empty
+			before := readList(t, ts)
+
+			status, out := importRaw(t, ts, "application/json", []byte(body))
+			if status != http.StatusBadRequest {
+				t.Fatalf("import = %d (%s), want 400", status, out)
+			}
+			if !strings.Contains(string(out), "picked_at") {
+				t.Errorf("import error = %s, want it to name picked_at", out)
+			}
+			assertList(t, readList(t, ts), before)
+			if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Ann" {
+				t.Errorf("history after rejected import = %+v, want the seeded Pick", picks)
+			}
+		})
+	}
 }
 
 func TestImportRejectsEmptyAndMalformedFiles(t *testing.T) {
