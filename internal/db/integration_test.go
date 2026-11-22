@@ -326,6 +326,22 @@ func TestRevealEligiblePoolSize(t *testing.T) {
 	}
 }
 
+// The database itself rejects a second Pick with an existing Pick number.
+func TestPickNumbersAreUnique(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	addEntries(t, store, "ann", "ben")
+	res, err := engine.Draw(ctx, nil, nil)
+	if err != nil {
+		t.Fatalf("draw: %v", err)
+	}
+	_, err = store.DB.ExecContext(ctx,
+		`INSERT INTO picks (entry_id, pick_number) VALUES ($1, $2)`, res.Winner.ID, res.PickNumber)
+	if err == nil {
+		t.Fatal("inserting a duplicate Pick number succeeded, want it rejected")
+	}
+}
+
 // concurrently runs n calls of fn spread over many goroutines that start
 // together, and fails the test on any error.
 func concurrently(t *testing.T, n int, fn func(i int) error) {

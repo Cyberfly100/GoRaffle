@@ -14,7 +14,7 @@ CREATE TABLE picks (
     id          SERIAL PRIMARY KEY,
     entry_id    INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
     picked_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    pick_number INTEGER NOT NULL
+    pick_number INTEGER NOT NULL UNIQUE
 );
 
 CREATE INDEX idx_entries_pick_count ON entries(pick_count) WHERE NOT excluded;
