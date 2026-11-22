@@ -516,6 +516,9 @@ function openImportConfirm(file) {
   if (!dialog) return;
   const nameEl = $("#import-confirm-file");
   if (nameEl) nameEl.textContent = file.name;
+  // Export current List first must offer the List as the host sees it, so
+  // its link is rewritten from the List name field like every export link.
+  updateExportLinks($("#list-name")?.value || "");
   dialog.showModal();
 }
 

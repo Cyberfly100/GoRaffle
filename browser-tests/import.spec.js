@@ -1,4 +1,4 @@
-const { test, expect, seedEntries } = require("./fixtures");
+const { test, expect, seedEntries, setListName } = require("./fixtures");
 const h = require("./helpers");
 
 test.describe("import warning", () => {
@@ -39,6 +39,25 @@ test.describe("import warning", () => {
     await expect(page.locator("#import-file")).toHaveValue("");
     await h.closeImportExport(page);
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
+  });
+
+  test("\"Export current List first\" downloads a List file without closing the warning", async ({ page, request }) => {
+    await setListName(request, "Club");
+    await h.showEntriesOnLoad(page);
+    await page.goto("/");
+    await h.openImportExport(page);
+
+    await page.locator("#import-file").setInputFiles(h.jsonFile("people.json", { entries: [{ name: "Zed" }] }));
+    await expect(page.locator("#import-confirm")).toBeVisible();
+
+    const download = page.waitForEvent("download");
+    await page.locator("#export-first").click();
+    expect((await download).suggestedFilename()).toBe("Club.json");
+
+    await expect(page.locator("#import-confirm")).toBeVisible();
+    await page.locator("#import-cancel-btn").click();
+    await expect(page.locator("#import-confirm")).toBeHidden();
+    expect(await h.entryNamesInTable(page)).toEqual([]);
   });
 
   test("after an Import a second connected browser shows the new List and History", async ({ page, browser }, testInfo) => {
