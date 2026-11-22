@@ -63,7 +63,7 @@ func (e *Engine) Draw(ctx context.Context, filter model.TagFilter) (*Reveal, err
 		}
 		e.mu.Unlock()
 
-		count, pickNumber, pickID, err := tx.RecordPick(ctx, winner.ID)
+		pick, err := tx.RecordPick(ctx, winner.ID)
 		if err != nil {
 			return err
 		}
@@ -71,12 +71,12 @@ func (e *Engine) Draw(ctx context.Context, filter model.TagFilter) (*Reveal, err
 		if err != nil {
 			return err
 		}
-		entry.PickCount = count
+		entry.PickCount = pick.PickCount
 
 		reveal = &Reveal{
 			Winner:        entry,
-			PickID:        pickID,
-			PickNumber:    pickNumber,
+			PickID:        pick.PickID,
+			PickNumber:    pick.PickNumber,
 			TagFilter:     filter,
 			EligiblePool:  len(pool),
 			SuspenseNames: suspense,
