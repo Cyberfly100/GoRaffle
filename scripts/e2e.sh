@@ -112,6 +112,7 @@ echo "=== export/import ==="
 export_json=$(curl -s "$base/api/export?format=json")
 check "export json has entries" "13" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["entries"]))' 2>/dev/null || echo ERR)"
 check "export json has list_name" "Entries" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
+check "export json has an empty picks key" "0" "$(printf '%s' "$export_json" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["picks"]))' 2>/dev/null || echo ERR)"
 curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"Bob","pick_count":2,"excluded":false,"tags":["Newbie"]},{"name":"Carol"}]}' >/dev/null
 cs2=$(curl -s "$base/api/entries")
 check "import added 2 entries (15 total)" "15" "$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
@@ -120,10 +121,20 @@ check "import set Bob pick_count" "2" "$bob"
 bobtags=$(printf '%s' "$cs2" | python3 -c 'import sys,json;print(",".join(next(c["tags"] for c in json.load(sys.stdin) if c["name"]=="Bob")))' 2>/dev/null)
 check "import set Bob tags" "Newbie" "$bobtags"
 
-echo "=== CSV export ==="
-csv=$(curl -s "$base/api/export?format=csv")
-check "csv first row is list_name" "list_name" "$(printf '%s' "$csv" | head -1 | cut -d, -f1)"
-check "csv second row is column header" "name" "$(printf '%s' "$csv" | sed -n 2p | cut -d, -f1)"
+echo "=== removed exports ==="
+check "csv list export is gone" "400" "$(curl -s -o /dev/null -w "%{http_code}" "$base/api/export?format=csv")"
+check "history export csv is gone" "404" "$(curl -s -o /dev/null -w "%{http_code}" "$base/api/export/history?format=csv")"
+check "history export json is gone" "404" "$(curl -s -o /dev/null -w "%{http_code}" "$base/api/export/history?format=json")"
+
+echo "=== export carries the History ==="
+draw2=$(curl -s -X POST "$base/api/draw" -H 'Content-Type: application/json' -d '{"must_have":[],"any_of":[]}')
+winner2=$(printf '%s' "$draw2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["winner"]["name"])' 2>/dev/null)
+check "draw returns winner name" "nonempty" "$([ -n "$winner2" ] && echo nonempty)"
+export2=$(curl -s "$base/api/export?format=json")
+check "export picks has one pick" "1" "$(printf '%s' "$export2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["picks"]))' 2>/dev/null || echo ERR)"
+check "export pick names the winner" "$winner2" "$(printf '%s' "$export2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["picks"][0]["entry_name"])' 2>/dev/null || echo ERR)"
+check "export pick is number 1" "1" "$(printf '%s' "$export2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["picks"][0]["pick_number"])' 2>/dev/null || echo ERR)"
+check "export pick time is RFC3339" "ok" "$(printf '%s' "$export2" | python3 -c 'import sys,json,datetime;datetime.datetime.strptime(json.load(sys.stdin)["picks"][0]["picked_at"],"%Y-%m-%dT%H:%M:%S%z");print("ok")' 2>/dev/null || echo ERR)"
 
 echo "=== list name ==="
 curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"My List"}' >/dev/null
@@ -135,20 +146,15 @@ imp=$(curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d 
 check "import response carries list_name" "Swapped" "$(printf '%s' "$imp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["list_name"])' 2>/dev/null || echo ERR)"
 ln3=$(curl -s "$base/api/list-name")
 check "import set list name" "Swapped" "$(printf '%s' "$ln3" | python3 -c 'import sys,json;print(json.load(sys.stdin)["name"])' 2>/dev/null || echo ERR)"
-csvname=$(curl -s "$base/api/export?format=csv" | head -1 | cut -d, -f2)
-check "csv carries list name" "Swapped" "$csvname"
 
-echo "=== CSV round-trip ==="
-# Export the current state, clear, re-import: the counts must survive and no
-# bogus "list_name" entry may appear from the header rows.
-curl -s "$base/api/export?format=csv" > /tmp/opencode/raffle_rt.csv
+echo "=== JSON round-trip ==="
+# Export the current state, clear, re-import: the List must come back whole.
+curl -s "$base/api/export?format=json" > /tmp/opencode/raffle_rt.json
 before=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
 curl -s -X DELETE "$base/api/entries" >/dev/null
-curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt.csv" >/dev/null
+curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt.json" >/dev/null
 after=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')
-check "csv round-trip preserves entry count" "$before" "$after"
-bogus=$(curl -s "$base/api/entries" | python3 -c 'import sys,json;print("yes" if any(c["name"] in ("list_name","name") for c in json.load(sys.stdin)) else "no")')
-check "csv round-trip adds no header entries" "no" "$bogus"
+check "json round-trip preserves entry count" "$before" "$after"
 # restore the default so the app starts clean for the user later
 curl -s -X PUT "$base/api/list-name" -H 'Content-Type: application/json' -d '{"name":"Entries"}' >/dev/null
 
@@ -168,10 +174,15 @@ check "table partial" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/parti
 check "filter partial" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/partials/filter")"
 check "history partial" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/partials/history")"
 check "result partial" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/partials/result")"
-check "import-export partial" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/partials/import-export")"
 check "static css" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/static/css/style.css")"
 check "static js app" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/static/js/app.js")"
 check "static js ws" 200 "$(curl -s -o /dev/null -w "%{http_code}" "$base/static/js/ws.js")"
+
+echo "=== import/export interface ==="
+page=$(curl -s "$base/")
+check "page has import/export section" "yes" "$(printf '%s' "$page" | grep -q 'id="import-export"' && echo yes || echo no)"
+check "page offers exactly one export (the List file)" "1" "$(printf '%s' "$page" | grep -o 'data-export-format' | wc -l)"
+check "page offers no CSV or History export" "0" "$(printf '%s' "$page" | grep -c -e 'format=csv' -e 'export/history')"
 
 # re-seed defaults so the app starts clean for the user later
 curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' -d '{"entries":[{"name":"entry 1"},{"name":"entry 2"},{"name":"entry 3"},{"name":"entry 4"},{"name":"entry 5"},{"name":"entry 6"},{"name":"entry 7"},{"name":"entry 8"},{"name":"entry 9"},{"name":"entry 10"},{"name":"entry 11"},{"name":"entry 12"}]}' >/dev/null
