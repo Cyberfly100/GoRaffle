@@ -461,6 +461,52 @@ func TestImportRejectsPickWithInvalidTime(t *testing.T) {
 	}
 }
 
+// A file naming the same Entry twice (case-insensitively) is rejected with
+// the duplicated names listed, and nothing changes.
+func TestImportRejectsDuplicateEntryNames(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		wantName    string
+	}{
+		"same name twice": {
+			"application/json",
+			`{"entries":[{"name":"Ann"},{"name":"Ann"}]}`,
+			"Ann",
+		},
+		"same name in different case": {
+			"application/json",
+			`{"entries":[{"name":"Ann"},{"name":"ann"}]}`,
+			"ann",
+		},
+		"CSV duplicate": {
+			"text/csv",
+			"Ann\nann\n",
+			"ann",
+		},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			seedList(t, ts, "Untouched", []listEntry{{Name: "Ann", PickCount: 1, Tags: []string{}}})
+			postJSON(t, ts, "/api/draw", `{}`) // Ann wins: the History is non-empty
+			before := readList(t, ts)
+
+			status, out := importRaw(t, ts, c.contentType, []byte(c.body))
+			if status != http.StatusBadRequest {
+				t.Fatalf("import = %d (%s), want 400", status, out)
+			}
+			if !strings.Contains(string(out), "duplicate") || !strings.Contains(string(out), c.wantName) {
+				t.Errorf("import error = %s, want it to list the duplicated name %q", out, c.wantName)
+			}
+			assertList(t, readList(t, ts), before)
+			if picks := readHistory(t, ts); len(picks) != 1 || picks[0].EntryName != "Ann" {
+				t.Errorf("history after rejected import = %+v, want the seeded Pick", picks)
+			}
+		})
+	}
+}
+
 func TestImportRejectsEmptyAndMalformedFiles(t *testing.T) {
 	cases := map[string]struct {
 		contentType string

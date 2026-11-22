@@ -79,7 +79,31 @@ func Decode(body []byte, contentTypeHint string) (model.List, error) {
 	if err != nil {
 		return model.List{}, err
 	}
-	return normalize(l), nil
+	l = normalize(l)
+	if dups := duplicatedNames(l.Entries); len(dups) > 0 {
+		return model.List{}, fmt.Errorf("duplicate entries in the file: %s", strings.Join(dups, ", "))
+	}
+	return l, nil
+}
+
+// duplicatedNames lists, in the form they appear, every Entry name that
+// occurs more than once (case-insensitively).
+func duplicatedNames(entries []model.ListEntry) []string {
+	seen := make(map[string]bool, len(entries))
+	var dups []string
+	listed := make(map[string]bool)
+	for _, e := range entries {
+		key := strings.ToLower(e.Name)
+		if !seen[key] {
+			seen[key] = true
+			continue
+		}
+		if !listed[key] {
+			listed[key] = true
+			dups = append(dups, e.Name)
+		}
+	}
+	return dups
 }
 
 func looksLikeJSON(body []byte) bool {
