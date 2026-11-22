@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/goraffle/raffle/internal/raffle"
 )
 
 // pickSet stands in for the Store: the Picks that still exist.
@@ -44,5 +46,18 @@ func TestNoReplayAfterWindow(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	if msg := r.replay(context.Background(), picks.stands); msg != nil {
 		t.Errorf("replayed %q after the window", msg)
+	}
+}
+
+// The replay window covers the longest Reveal the Reel can play, read from
+// the one definition of its timing, plus a margin.
+func TestReplayWindowCoversTheLongestReveal(t *testing.T) {
+	timing := raffle.Timing
+	longest := time.Duration(timing.SuspenseMS+timing.LandingMaxMS+timing.SettleMS) * time.Millisecond
+	if defaultRevealReplayWindow <= longest {
+		t.Errorf("replay window %v does not cover the longest Reveal %v", defaultRevealReplayWindow, longest)
+	}
+	if timing.LandingMS > timing.LandingMaxMS {
+		t.Errorf("nominal landing %dms exceeds its bound %dms", timing.LandingMS, timing.LandingMaxMS)
 	}
 }

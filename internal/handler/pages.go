@@ -45,6 +45,8 @@ func LoadTemplates(sys fs.FS) (*template.Template, error) {
 		"tagClass": func(name string) string {
 			return tagPalette[fingerprint(name)%len(tagPalette)]
 		},
+		// revealTiming is the Reel's timing, rendered into the page once.
+		"revealTiming": func() raffle.RevealTiming { return raffle.Timing },
 		"formatTime": func(t time.Time) string {
 			return t.Local().Format("02 Jan 2006 15:04")
 		},

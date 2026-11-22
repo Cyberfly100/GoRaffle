@@ -24,8 +24,10 @@
 // -> idle with reduced motion. A Reveal that arrives while busy is queued and
 // played after the current landing finishes.
 //
-// These constants are the only definition of a Reveal's length (the server's
-// replay window in internal/handler/replay.go is sized from them).
+// A Reveal's length is defined once, on the server (raffle.Timing in
+// internal/raffle/timing.go), and rendered into the page as the
+// #reveal-timing JSON; the server's replay window is derived from the same
+// values. The Reel reads them here and keeps no copy of its own.
 import { planLanding, HORIZONTAL, VERTICAL } from "./reel-plan.js";
 import { confettiBurst } from "./confetti.js";
 
@@ -33,13 +35,22 @@ import { confettiBurst } from "./confetti.js";
 // names make the cells, and so the landing can hand over without a jump in
 // speed. Wind-up + cruise fill the Suspense, then the landing runs.
 export const CRUISE_SPEED = 4.35;
-export const LANDING_MS = 1800;
 const WINDUP_MS = 900;
-// How long the belt spins (wind-up included) before it starts landing.
-export const SUSPENSE_MS = 2000;
+const timing = readTiming();
+// How long the belt runs (wind-up included) before it starts landing.
+export const SUSPENSE_MS = timing.suspense_ms;
+// The nominal landing, and the bound on the measured one.
+export const LANDING_MS = timing.landing_ms;
+const LANDING_MAX_MS = timing.landing_max_ms;
 // The landed winner stays on the belt this long before the Reel is idle.
-const SETTLE_MS = 420;
+const SETTLE_MS = timing.settle_ms;
 const MIN_LANDING_SPEED = 0.15;
+
+function readTiming() {
+  const el = document.getElementById("reveal-timing");
+  if (!el) throw new Error("reel: the page carries no #reveal-timing");
+  return JSON.parse(el.textContent);
+}
 
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -283,7 +294,8 @@ export function createReel({ orientation = "horizontal" } = {}) {
     for (const n of plan.tail) track.appendChild(cell(n));
     restNeighbours = neighbours(winnerCell);
 
-    const dur = Math.round(plan.duration);
+    // Bounded, so every Reveal ends within the server's replay window.
+    const dur = Math.round(Math.min(plan.duration, LANDING_MAX_MS));
     void track.offsetWidth;
     track.style.transitionDuration = dur + "ms";
     track.style.transform = `${ax.translate}(${-(travelled + plan.distance)}px)`;

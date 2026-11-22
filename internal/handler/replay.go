@@ -5,13 +5,18 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/goraffle/raffle/internal/raffle"
 )
 
 // defaultRevealReplayWindow is how long after a Draw a newly connected
-// browser is still sent its Reveal: the Reel's Reveal (Suspense 2s, landing
-// ~1.8s, settle 0.42s; see the constants in static/js/reel.js) plus a margin.
-// After it, the browser's normal page render already shows the result.
-const defaultRevealReplayWindow = 6 * time.Second
+// browser is still sent its Reveal: the longest Reveal the Reel plays (from
+// raffle.Timing, the same constants the page hands the Reel) plus a margin
+// for network and render delay. After it, the browser's normal page render
+// already shows the result.
+var defaultRevealReplayWindow = raffle.Timing.Longest() + revealReplayMargin
+
+const revealReplayMargin = 500 * time.Millisecond
 
 // revealReplay remembers the most recent Reveal event, its Pick and when it
 // was sent, so a browser that (re)connects during it can play it too.

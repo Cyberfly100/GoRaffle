@@ -742,3 +742,33 @@ func assertJSONBody(t *testing.T, ts *httptest.Server, method, path string, body
 	}
 	check(out)
 }
+
+// The page carries the Reveal timing the server defines, and the Reel reads
+// it from there instead of keeping its own copy.
+func TestPageCarriesRevealTiming(t *testing.T) {
+	ts := newTestServer(t)
+	page := string(bodyOf(t, ts, "/"))
+	const open = `<script type="application/json" id="reveal-timing">`
+	i := strings.Index(page, open)
+	if i < 0 {
+		t.Fatalf("page has no %s", open)
+	}
+	rest := page[i+len(open):]
+	var got raffle.RevealTiming
+	if err := json.Unmarshal([]byte(rest[:strings.Index(rest, "</script>")]), &got); err != nil {
+		t.Fatalf("reveal timing JSON: %v", err)
+	}
+	if want := (raffle.RevealTiming{SuspenseMS: 2000, LandingMS: 1800, LandingMaxMS: 3000, SettleMS: 420}); got != want {
+		t.Errorf("page timing = %+v, want %+v", got, want)
+	}
+
+	reel := string(bodyOf(t, ts, "/static/js/reel.js"))
+	if !strings.Contains(reel, `"reveal-timing"`) {
+		t.Error("reel.js does not read the page's reveal-timing")
+	}
+	for _, own := range []string{"SUSPENSE_MS = 2", "LANDING_MS = 1", "SETTLE_MS = 4"} {
+		if strings.Contains(reel, own) {
+			t.Errorf("reel.js keeps its own timing constant %q", own)
+		}
+	}
+}

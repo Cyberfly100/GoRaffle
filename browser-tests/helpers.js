@@ -205,7 +205,8 @@ async function reelStaysStill(page, ms) {
   );
 }
 
-// The server replays a Reveal to browsers that connect within 6s of it.
+// The server replays a Reveal to browsers that connect within its replay
+// window: the longest Reveal (raffle.Timing) plus a margin, under 6s.
 const REPLAY_WINDOW_MS = 6000;
 
 // Waits until a Draw made at `drawnAt` (Date.now()) can no longer be replayed.
