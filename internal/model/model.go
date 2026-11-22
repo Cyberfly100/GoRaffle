@@ -50,6 +50,7 @@ type DrawRequest struct {
 type List struct {
 	Name    string
 	Entries []ListEntry
+	Picks   []ListPick
 }
 
 // ListEntry is one Entry of a List. Nil PickCount/Excluded and a nil Tags
@@ -59,4 +60,13 @@ type ListEntry struct {
 	PickCount *int
 	Excluded  *bool
 	Tags      []string
+}
+
+// ListPick is one Pick of a List's History as it crosses between the List
+// exchange, the handlers and the store: the Entry's name, the time it was
+// picked and its Pick number.
+type ListPick struct {
+	EntryName  string
+	PickedAt   time.Time
+	PickNumber int
 }

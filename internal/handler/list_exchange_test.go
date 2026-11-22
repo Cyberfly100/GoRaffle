@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // listEntry is one Entry as the entries endpoint reports it, reduced to the
@@ -141,6 +142,73 @@ var richList = listSnapshot{
 		{Name: "Carol \"The Hammer\"", PickCount: 7, Excluded: false, Tags: []string{"a,b", "x\"y"}},
 		{Name: "Dan\nSecond line", PickCount: 1, Excluded: true, Tags: []string{"TeamA"}},
 	},
+}
+
+// The List file carries the complete History: one JSON Pick per Draw, ordered
+// by Pick number, even when the History is empty.
+func TestExportCarriesHistory(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Drawn List", []listEntry{
+		{Name: "Alice", Tags: []string{"VIP"}},
+		{Name: "Bob", Tags: []string{}},
+	})
+
+	// With no Picks yet the file still carries the (empty) History.
+	first, _ := export(t, ts, "json")
+	var empty struct {
+		Picks []json.RawMessage `json:"picks"`
+	}
+	if err := json.Unmarshal(first, &empty); err != nil {
+		t.Fatalf("export without history: %v (%s)", err, first)
+	}
+	if empty.Picks == nil || len(empty.Picks) != 0 {
+		t.Errorf("export picks = %v, want an empty non-nil array", empty.Picks)
+	}
+
+	// Two Draws empty the Pot: the winners are Alice and Bob, in the order
+	// the Draw responses name them.
+	var order []string
+	for i := 0; i < 2; i++ {
+		var res struct {
+			Winner struct {
+				Name string `json:"name"`
+			} `json:"winner"`
+		}
+		if err := json.Unmarshal(postJSON(t, ts, "/api/draw", `{"must_have":[],"any_of":[]}`), &res); err != nil {
+			t.Fatalf("draw response: %v", err)
+		}
+		order = append(order, res.Winner.Name)
+	}
+
+	body, _ := export(t, ts, "json")
+	var file struct {
+		ListName string `json:"list_name"`
+		Picks    []struct {
+			EntryName  string `json:"entry_name"`
+			PickNumber int    `json:"pick_number"`
+			PickedAt   string `json:"picked_at"`
+		} `json:"picks"`
+	}
+	if err := json.Unmarshal(body, &file); err != nil {
+		t.Fatalf("export: %v (%s)", err, body)
+	}
+	if file.ListName != "Drawn List" {
+		t.Errorf("export list_name = %q, want %q", file.ListName, "Drawn List")
+	}
+	if len(file.Picks) != 2 {
+		t.Fatalf("export picks = %d, want 2", len(file.Picks))
+	}
+	for i, p := range file.Picks {
+		if p.PickNumber != i+1 {
+			t.Errorf("picks[%d].pick_number = %d, want %d", i, p.PickNumber, i+1)
+		}
+		if p.EntryName != order[i] {
+			t.Errorf("picks[%d].entry_name = %q, want %q", i, p.EntryName, order[i])
+		}
+		if _, err := time.Parse(time.RFC3339, p.PickedAt); err != nil {
+			t.Errorf("picks[%d].picked_at = %q, not RFC3339: %v", i, p.PickedAt, err)
+		}
+	}
 }
 
 func TestListRoundTripJSON(t *testing.T) {

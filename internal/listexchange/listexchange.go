@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/goraffle/raffle/internal/model"
 )
@@ -117,10 +118,18 @@ type jsonEntry struct {
 	Tags      []string `json:"tags,omitempty"`
 }
 
+// jsonPick is one Pick of the History in the JSON format.
+type jsonPick struct {
+	EntryName  string `json:"entry_name"`
+	PickNumber int    `json:"pick_number"`
+	PickedAt   string `json:"picked_at"`
+}
+
 // jsonList is the JSON export layout. Field order fixes the byte layout.
 type jsonList struct {
 	Entries  []jsonEntry `json:"entries"`
 	ListName string      `json:"list_name"`
+	Picks    []jsonPick  `json:"picks"`
 }
 
 func decodeJSON(body []byte) (model.List, error) {
@@ -257,13 +266,26 @@ func Encode(l model.List, f Format) ([]byte, error) {
 }
 
 func encodeJSON(l model.List) ([]byte, error) {
-	out := jsonList{ListName: l.Name, Entries: make([]jsonEntry, 0, len(l.Entries))}
+	out := jsonList{
+		ListName: l.Name,
+		Entries:  make([]jsonEntry, 0, len(l.Entries)),
+		// The History is always present, empty or not, so a List file
+		// never lacks the Picks key.
+		Picks: make([]jsonPick, 0, len(l.Picks)),
+	}
 	for _, e := range l.Entries {
 		out.Entries = append(out.Entries, jsonEntry{
 			Name:      e.Name,
 			PickCount: intOr(e.PickCount, 0),
 			Excluded:  boolOr(e.Excluded, false),
 			Tags:      e.Tags,
+		})
+	}
+	for _, p := range l.Picks {
+		out.Picks = append(out.Picks, jsonPick{
+			EntryName:  p.EntryName,
+			PickNumber: p.PickNumber,
+			PickedAt:   p.PickedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	var buf bytes.Buffer

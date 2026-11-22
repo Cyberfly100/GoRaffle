@@ -351,8 +351,9 @@ func (s *Store) ListHistory(ctx context.Context) ([]model.Pick, error) {
 	return out, rows.Err()
 }
 
-// ReadList returns the List: its name and every Entry with its Pick count,
-// Excluded flag and Tags, ordered by name.
+// ReadList returns the List: its name, every Entry with its Pick count,
+// Excluded flag and Tags ordered by name, and the History as its Picks
+// ordered by Pick number.
 func (s *Store) ReadList(ctx context.Context) (model.List, error) {
 	name, err := s.GetListName(ctx)
 	if err != nil {
@@ -362,7 +363,15 @@ func (s *Store) ReadList(ctx context.Context) (model.List, error) {
 	if err != nil {
 		return model.List{}, err
 	}
-	l := model.List{Name: name, Entries: make([]model.ListEntry, 0, len(entries))}
+	picks, err := s.listPicks(ctx)
+	if err != nil {
+		return model.List{}, err
+	}
+	l := model.List{
+		Name:    name,
+		Entries: make([]model.ListEntry, 0, len(entries)),
+		Picks:   picks,
+	}
 	for _, e := range entries {
 		l.Entries = append(l.Entries, model.ListEntry{
 			Name:      e.Name,
@@ -372,6 +381,31 @@ func (s *Store) ReadList(ctx context.Context) (model.List, error) {
 		})
 	}
 	return l, nil
+}
+
+// listPicks returns every Pick with its Entry's name, ordered by Pick number.
+func (s *Store) listPicks(ctx context.Context) ([]model.ListPick, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT c.name, p.picked_at, p.pick_number
+		FROM picks p JOIN entries c ON c.id = p.entry_id
+		ORDER BY p.pick_number`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []model.ListPick
+	for rows.Next() {
+		var p model.ListPick
+		if err := rows.Scan(&p.EntryName, &p.PickedAt, &p.PickNumber); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	if out == nil {
+		out = []model.ListPick{}
+	}
+	return out, rows.Err()
 }
 
 // ApplyList merges an imported List into the database in one transaction:
