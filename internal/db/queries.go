@@ -252,9 +252,10 @@ func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 	return p, err
 }
 
-// UndoLastPick atomically removes the last pick and decrements the winner's count.
+// UndoLastPick atomically removes the last pick and decrements the winner's count,
+// serialized against Draws and Reset.
 func (s *Store) UndoLastPick(ctx context.Context) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err
 	}
@@ -384,9 +385,10 @@ func boolOr(b *bool, def bool) bool {
 	return def
 }
 
-// ResetScores zeroes all counts and clears pick history in a transaction.
+// ResetScores zeroes all counts and clears pick history in a transaction
+// serialized against Draws and Undo.
 func (s *Store) ResetScores(ctx context.Context) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
 		return err
 	}

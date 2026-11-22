@@ -3,14 +3,18 @@ package db_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	_ "github.com/lib/pq"
 
 	"github.com/goraffle/raffle/internal/db"
+	"github.com/goraffle/raffle/internal/model"
 	"github.com/goraffle/raffle/internal/raffle"
 )
 
@@ -319,5 +323,134 @@ func TestRevealEligiblePoolSize(t *testing.T) {
 	}
 	if res.EligiblePool != 3 {
 		t.Errorf("eligible pool = %d, want 3 (ann, ben, cat)", res.EligiblePool)
+	}
+}
+
+// concurrently runs n calls of fn spread over many goroutines that start
+// together, and fails the test on any error.
+func concurrently(t *testing.T, n int, fn func(i int) error) {
+	t.Helper()
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			if err := fn(i); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("concurrent call: %v", err)
+	}
+}
+
+// historyInOrder returns the History oldest first, failing unless the Pick
+// numbers are exactly 1..len with no duplicates.
+func historyInOrder(t *testing.T, store *db.Store) []model.Pick {
+	t.Helper()
+	picks, err := store.ListHistory(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Slice(picks, func(i, j int) bool { return picks[i].PickNumber < picks[j].PickNumber })
+	for i, p := range picks {
+		if p.PickNumber != i+1 {
+			nums := make([]int, len(picks))
+			for k, q := range picks {
+				nums[k] = q.PickNumber
+			}
+			t.Fatalf("Pick numbers = %v, want 1..%d with no duplicates", nums, len(picks))
+		}
+	}
+	return picks
+}
+
+// With N Entries, k×N concurrent Draws pick everyone exactly k times, with
+// Pick numbers exactly 1..k×N.
+func TestConcurrentDrawsStayFair(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	const n, k = 8, 3
+	ids := addEntries(t, store, "a", "b", "c", "d", "e", "f", "g", "h")
+
+	concurrently(t, k*n, func(int) error {
+		_, err := engine.Draw(ctx, nil, nil)
+		return err
+	})
+
+	picks := historyInOrder(t, store)
+	if len(picks) != k*n {
+		t.Errorf("history has %d Picks, want %d", len(picks), k*n)
+	}
+	for name, id := range ids {
+		e, _ := store.GetEntry(ctx, id)
+		if e.PickCount != k {
+			t.Errorf("%s pick count = %d, want %d", name, e.PickCount, k)
+		}
+	}
+}
+
+// Replaying the History of concurrent Draws, every winner was in the Pot when
+// its Pick was recorded: no Pick count ever pulls more than one ahead.
+func TestConcurrentDrawsPickFromPot(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	addEntries(t, store, "a", "b", "c", "d", "e")
+
+	concurrently(t, 23, func(int) error {
+		_, err := engine.Draw(ctx, nil, nil)
+		return err
+	})
+
+	counts := map[int]int{}
+	entries, _ := store.ListEntries(ctx)
+	for _, e := range entries {
+		counts[e.ID] = 0
+	}
+	for _, p := range historyInOrder(t, store) {
+		for id, c := range counts {
+			if c < counts[p.EntryID] {
+				t.Fatalf("Pick %d went to %s with %d Picks while Entry %d had only %d",
+					p.PickNumber, p.EntryName, counts[p.EntryID], id, c)
+			}
+		}
+		counts[p.EntryID]++
+	}
+}
+
+// Concurrent Draws mixed with Undo leave unique Pick numbers and Pick counts
+// that agree with the History.
+func TestConcurrentDrawsWithUndo(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	addEntries(t, store, "a", "b", "c", "d")
+
+	concurrently(t, 40, func(i int) error {
+		if i%3 == 2 {
+			if err := store.UndoLastPick(ctx); err != nil && !errors.Is(err, db.ErrNotFound) {
+				return err
+			}
+			return nil
+		}
+		_, err := engine.Draw(ctx, nil, nil)
+		return err
+	})
+
+	fromHistory := map[int]int{}
+	for _, p := range historyInOrder(t, store) {
+		fromHistory[p.EntryID]++
+	}
+	entries, _ := store.ListEntries(ctx)
+	for _, e := range entries {
+		if e.PickCount != fromHistory[e.ID] {
+			t.Errorf("%s pick count = %d, but History has %d Picks", e.Name, e.PickCount, fromHistory[e.ID])
+		}
 	}
 }

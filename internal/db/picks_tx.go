@@ -35,9 +35,23 @@ func (s *Store) InPicksTx(ctx context.Context, fn func(*PicksTx) error) error {
 	return tx.Commit()
 }
 
-// beginPicksTx opens a transaction and takes the Picks lock.
+// picksLockKey identifies the transaction-scoped advisory lock that every
+// transaction mutating Picks takes first.
+// The value is arbitrary but must stay the same for all of them.
+const picksLockKey = 727001
+
+// beginPicksTx opens a transaction and takes the Picks lock, which is held
+// until the transaction commits or rolls back.
 func (s *Store) beginPicksTx(ctx context.Context) (*sql.Tx, error) {
-	return s.DB.BeginTx(ctx, nil)
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, picksLockKey); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	return tx, nil
 }
 
 // EligiblePool returns the Eligible pool under the tag filter
