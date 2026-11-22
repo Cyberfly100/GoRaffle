@@ -9,10 +9,22 @@ require a rebuild — including the docker image — to be visible).
 - Build: `go build ./...`
 - Test: `go test ./...`
 - Lint: `go vet ./... && gofmt -l .` (must report nothing; fix with `gofmt -w`)
-- JS syntax check: `node --check static/js/app.js static/js/ws.js`
+- JS syntax check: `for f in static/js/*.js; do node --check "$f"; done` (native ES modules, no build step)
+- JS unit tests (pure modules, no dependencies): `node --test 'js-tests/*.test.js'`
 - E2E smoke test: `bash scripts/e2e.sh`
 - Browser tests: `npm install && npx playwright install chromium` once, then `npx playwright test`
   (one file: `npx playwright test browser-tests/import.spec.js`; one test: `-g "<title>"`)
+
+## Browser code
+
+- `static/js/` is native ES modules loaded by `<script type="module" src="/static/js/app.js">`;
+  no bundler. `app.js` is page wiring; `reel.js` is the Reel (its interface is
+  documented at the top of the file); `reel-plan.js` is its pure landing
+  planner; `sound.js`, `confetti.js`, `ws.js` are what they say.
+- Only `reel.js` reads or writes Reel state, Reel classes or Reel CSS variables.
+  Ask `reel.busy()` instead of checking phases; react to `reel.onIdle`.
+- Pure modules get `node --test` tests in `js-tests/` (outside `static/`, so
+  they are not embedded in the binary).
 
 ## Browser test notes
 

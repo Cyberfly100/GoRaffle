@@ -86,6 +86,86 @@ async function restingReel(page) {
   });
 }
 
+// Waits for the Reel to start moving and then come to rest, the way the
+// audience sees it, and returns the name centred in the Reel window at the
+// moment it stopped. Reads only on-screen geometry.
+async function nextLanding(page, { timeout = 15_000 } = {}) {
+  return page.evaluate(
+    (timeout) =>
+      new Promise((resolve, reject) => {
+        const deadline = performance.now() + timeout;
+        const reel = () => document.querySelector("#result .reel");
+        const position = () => {
+          const cells = [...document.querySelectorAll("#result .reel-track .reel-cell")];
+          if (!cells.length) return null;
+          const r = cells[0].getBoundingClientRect();
+          return `${cells.length}:${cells[0].textContent}:${r.left.toFixed(1)}:${r.top.toFixed(1)}`;
+        };
+        const centred = () => {
+          const w = reel().getBoundingClientRect();
+          const cx = w.left + w.width / 2;
+          const cy = w.top + w.height / 2;
+          const cell = [...document.querySelectorAll("#result .reel-track .reel-cell")].find((c) => {
+            const r = c.getBoundingClientRect();
+            return r.left <= cx && cx < r.right && r.top <= cy && cy < r.bottom;
+          });
+          return cell ? cell.textContent.trim() : null;
+        };
+        let last = position();
+        let moved = false;
+        let still = 0;
+        const step = () => {
+          if (performance.now() > deadline) return reject(new Error(moved ? "Reel never stopped" : "Reel never moved"));
+          const now = position();
+          if (now !== last) {
+            moved = true;
+            still = 0;
+          } else if (moved && ++still >= 8) {
+            return resolve(centred());
+          }
+          last = now;
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+    timeout
+  );
+}
+
+// Resolves once the Reel is visibly moving.
+async function reelMoving(page) {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const pos = () => {
+          const r = document.querySelector("#result .reel-track .reel-cell")?.getBoundingClientRect();
+          return r ? `${r.left},${r.top}` : undefined;
+        };
+        let last = pos();
+        const step = () => {
+          const now = pos();
+          if (now !== undefined && last !== undefined && now !== last) return resolve();
+          last = now;
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      })
+  );
+}
+
+// Clicks Draw and returns the drawn winner's name from the server's reply.
+async function clickDraw(page) {
+  await expect(page.locator("#ws-status")).toHaveClass(/\bconnected\b/);
+  const reply = page.waitForResponse((r) => r.url().endsWith("/api/draw"));
+  await page.locator("#draw-btn").click();
+  return (await (await reply).json()).winner.name;
+}
+
+// The host's Pick History, from the API.
+async function history(request) {
+  return (await request.get("/api/history")).json();
+}
+
 // Keeps the page from ever getting a live websocket.
 async function blockWebSocket(page) {
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close());
@@ -106,4 +186,8 @@ module.exports = {
   renameList,
   restingReel,
   blockWebSocket,
+  nextLanding,
+  reelMoving,
+  clickDraw,
+  history,
 };
