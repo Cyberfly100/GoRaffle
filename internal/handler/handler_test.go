@@ -262,6 +262,95 @@ func TestDrawNoEligible(t *testing.T) {
 	}
 }
 
+// Undo never pushes a Pick count below zero (a hand-edited count of 0 stays
+// 0), still removes the Pick, and keeps the History undoable; above zero it
+// decrements by one as before.
+func TestUndoPickCountFloor(t *testing.T) {
+	ts := newTestServer(t)
+
+	created := postJSON(t, ts, "/api/entries", `{"name":"Solo"}`)
+	var c struct {
+		ID int `json:"id"`
+	}
+	if err := json.Unmarshal(created, &c); err != nil {
+		t.Fatalf("add response: %v (%s)", err, created)
+	}
+
+	pickCount := func() int {
+		body := bodyOf(t, ts, "/api/entries")
+		var entries []struct {
+			Name      string `json:"name"`
+			PickCount int    `json:"pick_count"`
+		}
+		if err := json.Unmarshal(body, &entries); err != nil {
+			t.Fatalf("entries unmarshal: %v (%s)", err, body)
+		}
+		if len(entries) != 1 || entries[0].Name != "Solo" {
+			t.Fatalf("entries = %s, want just Solo", body)
+		}
+		return entries[0].PickCount
+	}
+	historyLen := func() int {
+		body := bodyOf(t, ts, "/api/history")
+		var picks []map[string]any
+		if err := json.Unmarshal(body, &picks); err != nil {
+			t.Fatalf("history unmarshal: %v (%s)", err, body)
+		}
+		return len(picks)
+	}
+	undo := func() {
+		undone := postJSON(t, ts, "/api/undo", "")
+		assertBodyContainsRaw(t, undone, "Removed last entry: Solo")
+	}
+
+	for i := 0; i < 3; i++ {
+		postJSON(t, ts, "/api/draw", `{}`)
+	}
+	if got := pickCount(); got != 3 {
+		t.Fatalf("pick_count after 3 draws = %d, want 3", got)
+	}
+
+	// Above zero, Undo still decrements by one.
+	putJSON(t, ts, "/api/entries/"+itoa(c.ID), `{"pick_count":5}`)
+	undo()
+	if got := pickCount(); got != 4 {
+		t.Errorf("pick_count after undo above zero = %d, want 4", got)
+	}
+	if got := historyLen(); got != 2 {
+		t.Errorf("history after undo = %d Picks, want 2", got)
+	}
+
+	// At zero, Undo removes the Pick and the count stays 0, never negative.
+	putJSON(t, ts, "/api/entries/"+itoa(c.ID), `{"pick_count":0}`)
+	undo()
+	if got := pickCount(); got != 0 {
+		t.Errorf("pick_count after undo at zero = %d, want 0 (never negative)", got)
+	}
+	if got := historyLen(); got != 1 {
+		t.Errorf("history after undo at zero = %d Picks, want 1", got)
+	}
+
+	// The History stays undoable: the next Undo reaches the Pick before it.
+	undo()
+	if got := historyLen(); got != 0 {
+		t.Errorf("history after second undo = %d Picks, want 0", got)
+	}
+	if got := pickCount(); got != 0 {
+		t.Errorf("pick_count after second undo = %d, want 0", got)
+	}
+
+	// Undo past the beginning is rejected.
+	res := doReq(t, ts, "POST", "/api/undo", nil)
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 400 {
+		t.Errorf("undo with no Picks = %d, want 400 (%s)", res.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "cannot undo any further") {
+		t.Errorf("undo with no Picks said %s, want 'cannot undo any further'", body)
+	}
+}
+
 func TestImportMerges(t *testing.T) {
 	ts := newTestServer(t)
 
