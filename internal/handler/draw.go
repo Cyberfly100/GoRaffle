@@ -52,16 +52,12 @@ func (s *Server) broadcastReveal(reveal *raffle.Reveal) {
 }
 
 func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
-	last, err := s.store.LastPick(r.Context())
+	last, err := s.store.UndoLastPick(r.Context())
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
 			writeErr(w, http.StatusBadRequest, "cannot undo any further")
 			return
 		}
-		slogError(w, err, "last pick")
-		return
-	}
-	if err := s.store.UndoLastPick(r.Context()); err != nil {
 		slogError(w, err, "undo")
 		return
 	}

@@ -279,37 +279,42 @@ func (s *Store) LastPick(ctx context.Context) (model.Pick, error) {
 	return p, err
 }
 
-// UndoLastPick atomically removes the last pick and decrements the winner's count,
-// serialized against Draws and Reset.
-func (s *Store) UndoLastPick(ctx context.Context) error {
+// UndoLastPick atomically removes the last Pick and decrements the winner's
+// Pick count, serialized against Draws and Reset. It returns the Pick it
+// removed, read inside the same transaction, or ErrNotFound.
+func (s *Store) UndoLastPick(ctx context.Context) (model.Pick, error) {
 	tx, err := s.beginPicksTx(ctx)
 	if err != nil {
-		return err
+		return model.Pick{}, err
 	}
 	defer tx.Rollback()
 
-	var entryID, pickNumber int
-	err = tx.QueryRowContext(ctx,
-		`SELECT entry_id, pick_number FROM picks ORDER BY id DESC LIMIT 1 FOR UPDATE`).
-		Scan(&entryID, &pickNumber)
+	var p model.Pick
+	err = tx.QueryRowContext(ctx, `
+		SELECT p.id, p.entry_id, c.name, p.pick_number, p.picked_at
+		FROM picks p JOIN entries c ON c.id = p.entry_id
+		ORDER BY p.id DESC LIMIT 1
+		FOR UPDATE OF p`).
+		Scan(&p.ID, &p.EntryID, &p.EntryName, &p.PickNumber, &p.PickedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
+		return model.Pick{}, ErrNotFound
 	}
 	if err != nil {
-		return err
+		return model.Pick{}, err
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM picks WHERE id = (
-		   SELECT id FROM picks ORDER BY id DESC LIMIT 1)`); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM picks WHERE id = $1`, p.ID); err != nil {
+		return model.Pick{}, err
 	}
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE entries SET pick_count = pick_count - 1, updated_at = NOW() WHERE id = $1`,
-		entryID); err != nil {
-		return err
+		p.EntryID); err != nil {
+		return model.Pick{}, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return model.Pick{}, err
+	}
+	return p, nil
 }
 
 // ListHistory returns all picks (newest first) with names.

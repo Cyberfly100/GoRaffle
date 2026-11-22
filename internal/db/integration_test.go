@@ -197,8 +197,12 @@ func TestUndo(t *testing.T) {
 	if len(picks) != 1 {
 		t.Fatalf("history length = %d, want 1", len(picks))
 	}
-	if err := store.UndoLastPick(ctx); err != nil {
+	undone, err := store.UndoLastPick(ctx)
+	if err != nil {
 		t.Fatalf("undo: %v", err)
+	}
+	if undone.ID != res.PickID || undone.EntryName != "x" || undone.PickNumber != 1 {
+		t.Errorf("undo reported %+v, want Pick %d (#1) of x", undone, res.PickID)
 	}
 	picks, _ = store.ListHistory(ctx)
 	if len(picks) != 0 {
@@ -450,7 +454,7 @@ func TestConcurrentDrawsWithUndo(t *testing.T) {
 
 	concurrently(t, 40, func(i int) error {
 		if i%3 == 2 {
-			if err := store.UndoLastPick(ctx); err != nil && !errors.Is(err, db.ErrNotFound) {
+			if _, err := store.UndoLastPick(ctx); err != nil && !errors.Is(err, db.ErrNotFound) {
 				return err
 			}
 			return nil
