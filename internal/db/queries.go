@@ -215,8 +215,8 @@ func (s *Store) ClearEntries(ctx context.Context) error {
 	return err
 }
 
-// eligibleWhere is the tag-filter predicate shared by both eligible-pool
-// queries. $1 = mustHave (ALL required), $2 = anyOf (at least one).
+// eligibleWhere is the tag-filter predicate of the Eligible pool query.
+// $1 = mustHave (ALL required), $2 = anyOf (at least one).
 const eligibleWhere = `
   AND (
     array_length($1::text[], 1) IS NULL

@@ -390,6 +390,12 @@ func TestSuspenseNames(t *testing.T) {
 	if evt.Type == "suspense" && len(evt.Data.Names) == 0 {
 		t.Error("suspense event carried empty names array")
 	}
+	// Only Alice has the VIP Tag, so every name on the Reel is Alice.
+	for _, n := range evt.Data.Names {
+		if n != "Alice" {
+			t.Errorf("suspense name %q is outside the filtered Eligible pool (Alice only)", n)
+		}
+	}
 }
 
 func TestHistoryExportCSV(t *testing.T) {
