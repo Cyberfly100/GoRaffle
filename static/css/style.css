@@ -1400,6 +1400,18 @@ dialog::backdrop {
   padding-right: 1.75rem;
 }
 
+.import-confirm {
+  width: min(440px, calc(100vw - 2rem));
+}
+
+.import-confirm h2 {
+  margin-bottom: 0.5rem;
+}
+
+#import-confirm-text {
+  margin: 0;
+}
+
 .ie-close {
   position: absolute;
   top: 0.5rem;

@@ -32,12 +32,13 @@ async function closeImportExport(page) {
   await expect(page.locator("#ie-dialog")).toBeHidden();
 }
 
-// Chooses an in-memory file in the import dialog and clicks Import.
-// `file` is { name, mimeType, buffer }.
+// Chooses an in-memory file in the import dialog, which opens the warning,
+// and confirms the Import on it. `file` is { name, mimeType, buffer }.
 async function importFile(page, file) {
   await page.locator("#import-file").setInputFiles(file);
   await expect(page.locator("#file-chosen")).toHaveText(file.name);
-  await page.locator("#import-btn").click();
+  await expect(page.locator("#import-confirm")).toBeVisible();
+  await page.locator("#import-confirm-btn").click();
 }
 
 function jsonFile(name, body) {

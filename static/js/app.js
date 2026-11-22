@@ -308,9 +308,10 @@ function bindRowEvents() {
     if (e.target && e.target.id === "import-file") {
       const file = e.target.files && e.target.files[0];
       const nameEl = $("#file-chosen");
-      const btn = $("#import-btn");
       if (nameEl) nameEl.textContent = file ? file.name : "No file chosen";
-      if (btn) btn.disabled = !file;
+      // Choosing a file is the whole gesture: the warning opens right away,
+      // and its Import button is the only way the upload happens.
+      if (file) openImportConfirm(file);
     }
   });
 
@@ -320,10 +321,6 @@ function bindRowEvents() {
     const btnId = e.target.closest("button")?.id;
     if (btnId === "add-entry-btn") {
       addEntry();
-      return;
-    }
-    if (btnId === "import-btn") {
-      doImport();
       return;
     }
     if (btnId === "clear-entries-btn") {
@@ -509,18 +506,48 @@ async function doReset() {
 }
 
 /* ---------- Import / Export ---------- */
-async function doImport() {
-  const file = $("#import-file")?.files?.[0];
+// The Import confirmation: choosing a file opens the warning, and the upload
+// only happens on its Import button.
+let importPending = null; // the File awaiting confirmation
+
+function openImportConfirm(file) {
+  importPending = file;
+  const dialog = $("#import-confirm");
+  if (!dialog) return;
+  const nameEl = $("#import-confirm-file");
+  if (nameEl) nameEl.textContent = file.name;
+  dialog.showModal();
+}
+
+function closeImportConfirm() {
+  $("#import-confirm")?.close();
+}
+
+// A closed warning leaves no half-stated Import behind: the chosen file is
+// forgotten, however the dialog was closed (Cancel, backdrop, Escape).
+function resetImportForm() {
+  importPending = null;
+  const input = $("#import-file");
+  if (input) input.value = "";
+  const nameEl = $("#file-chosen");
+  if (nameEl) nameEl.textContent = "No file chosen";
+}
+
+async function doImport(opts = {}) {
+  const file = importPending;
   if (!file) {
-    toast("Choose a .json or .csv file first.");
+    toast("Choose a List file first.");
     return;
   }
   if (file.size > 10 * 1024 * 1024) {
     toast("File is too large.");
+    closeImportConfirm();
     return;
   }
   const form = new FormData();
   form.append("file", file);
+  if (opts.removeUnusedTags) form.append("remove_unused_tags", "1");
+  if (opts.skipMissingPicks) form.append("skip_missing_picks", "1");
   let resp;
   try {
     resp = await fetch("/api/import", { method: "POST", body: form });
@@ -531,6 +558,7 @@ async function doImport() {
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     toast(data.error || "Import failed.");
+    closeImportConfirm();
     return;
   }
   const entries = `${data.entries} ${data.entries === 1 ? "entry" : "entries"}`;
@@ -543,13 +571,23 @@ async function doImport() {
       updateExportLinks(data.list_name);
     }
   }
-  const fileInput = $("#import-file");
-  if (fileInput) fileInput.value = "";
-  const nameEl = $("#file-chosen");
-  if (nameEl) nameEl.textContent = "No file chosen";
-  const btn = $("#import-btn");
-  if (btn) btn.disabled = true;
+  closeImportConfirm();
   refreshIfNoWS();
+}
+
+function bindImportConfirm() {
+  const dialog = $("#import-confirm");
+  if (!dialog) return;
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("#import-confirm-btn")) {
+      doImport();
+      return;
+    }
+    if (e.target.closest("#import-cancel-btn") || e.target === dialog) {
+      closeImportConfirm(); // backdrop click cancels
+    }
+  });
+  dialog.addEventListener("close", resetImportForm);
 }
 
 async function doClearEntries() {
@@ -656,6 +694,7 @@ function init() {
   checkDb();
   setInterval(checkDb, 5000);
   bindIEDialog();
+  bindImportConfirm();
   bindCollapsible("history");
   bindCollapsible("entries");
   bindSoundToggle();
