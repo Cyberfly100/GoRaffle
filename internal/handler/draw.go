@@ -56,7 +56,7 @@ func (s *Server) undo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info := "Removed last entry: " + last.EntryName
-	s.broadcastChanged(Changed{Regions: []Region{RegionTable, RegionHistory, RegionLastPick}, Info: info})
+	s.broadcastChanged(Changed{Regions: pickRegions, Info: info})
 
 	writeJSON(w, http.StatusOK, map[string]string{"info": info})
 }
@@ -66,7 +66,7 @@ func (s *Server) reset(w http.ResponseWriter, r *http.Request) {
 		slogError(w, err, "reset")
 		return
 	}
-	s.changed(RegionTable, RegionHistory, RegionLastPick)
+	s.changed(pickRegions...)
 	writeJSON(w, http.StatusOK, map[string]bool{"reset": true})
 }
 

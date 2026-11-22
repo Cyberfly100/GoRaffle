@@ -46,6 +46,10 @@ const (
 	RegionListName   Region = "list-name"
 )
 
+// pickRegions are the regions any change to Picks or Pick counts makes stale:
+// the table (Pick counts, Pot), the History and the last Pick.
+var pickRegions = []Region{RegionTable, RegionHistory, RegionLastPick}
+
 // Changed is the "changed" event's data. Info, when set, is a message for
 // the host (the Undo toast text).
 type Changed struct {
