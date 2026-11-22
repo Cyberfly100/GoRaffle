@@ -181,6 +181,19 @@ test.describe("legacy import", () => {
   });
 });
 
+test.describe("the import form", () => {
+  test("the file picker offers only JSON, and the help text mentions only List files", async ({ page }) => {
+    await h.showEntriesOnLoad(page);
+    await page.goto("/");
+    await h.openImportExport(page);
+
+    await expect(page.locator("#import-file")).toHaveAttribute("accept", ".json");
+    const section = page.locator("#import-export");
+    await expect(section).toContainText("List file");
+    await expect(section).not.toContainText(/csv/i);
+  });
+});
+
 test.describe("import with a List name", () => {
   test("updates the List name field and the export link", async ({ page }) => {
     await page.goto("/");
