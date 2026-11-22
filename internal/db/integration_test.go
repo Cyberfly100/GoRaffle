@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 
@@ -536,6 +538,115 @@ func TestConcurrentDrawsWithUndo(t *testing.T) {
 		fromHistory[p.EntryID]++
 	}
 	entries, _ := store.ListEntries(ctx)
+	for _, e := range entries {
+		if e.PickCount != fromHistory[e.ID] {
+			t.Errorf("%s pick count = %d, but History has %d Picks", e.Name, e.PickCount, fromHistory[e.ID])
+		}
+	}
+}
+
+// The Import takes the Draw lock: while another transaction holds it, the
+// Import waits instead of interleaving, and lands once the lock is free.
+func TestImportListWaitsForPicksLock(t *testing.T) {
+	conn := testDB(t)
+	t.Cleanup(func() { conn.Close() })
+	store := db.NewStore(conn)
+	ctx := context.Background()
+	list := model.List{Entries: []model.ListEntry{{Name: "Ann"}}}
+
+	// Another Picks-mutating transaction (a Draw, Undo or Reset) holds the
+	// lock first. The key is picksLockKey in picks_tx.go, which every such
+	// transaction takes at the start.
+	holding, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer holding.Rollback()
+	if _, err := holding.ExecContext(ctx, `SELECT pg_advisory_xact_lock(727001)`); err != nil {
+		t.Fatalf("take lock: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.ImportList(ctx, list, db.ImportOptions{})
+		done <- err
+	}()
+
+	// While the lock is held the Import must not land.
+	select {
+	case err := <-done:
+		t.Fatalf("import finished while the Draw lock was held (err=%v), want it to wait", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// Released, the same Import goes through.
+	holding.Rollback()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("import after the lock was released: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("import did not finish after the lock was released")
+	}
+	entries, err := store.ListEntries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name != "Ann" {
+		t.Errorf("entries after import = %v, want Ann alone", entries)
+	}
+}
+
+// An Import never interleaves with a Draw: run both concurrently and the
+// outcome is one of the serialized orders — the List is exactly one
+// operation's result, Pick numbers are unique and consecutive, and Pick
+// counts match the History.
+func TestConcurrentImportsAndDraws(t *testing.T) {
+	store, engine := setup(t)
+	ctx := context.Background()
+	addEntries(t, store, "a", "b", "c")
+	file := model.List{
+		Name:    "Imported",
+		Entries: []model.ListEntry{{Name: "x"}, {Name: "y"}, {Name: "z"}},
+		Picks: []model.ListPick{
+			{EntryName: "x", PickedAt: time.Unix(1000, 0), PickNumber: 1},
+			{EntryName: "y", PickedAt: time.Unix(2000, 0), PickNumber: 2},
+			{EntryName: "z", PickedAt: time.Unix(3000, 0), PickNumber: 3},
+		},
+	}
+
+	concurrently(t, 30, func(i int) error {
+		if i%3 == 2 {
+			_, err := store.ImportList(ctx, file, db.ImportOptions{})
+			return err
+		}
+		_, err := engine.Draw(ctx, model.TagFilter{})
+		return err
+	})
+
+	// The List is exactly one operation's Entries, never a mix.
+	entries, err := store.ListEntries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	sort.Strings(names)
+	drawn := []string{"a", "b", "c"}
+	imported := []string{"x", "y", "z"}
+	if !reflect.DeepEqual(names, drawn) && !reflect.DeepEqual(names, imported) {
+		t.Errorf("entries after concurrent imports and draws = %v, want exactly %v or %v", names, drawn, imported)
+	}
+
+	// Pick numbers are unique and consecutive, and each Entry's Pick count
+	// is the number of its Picks in the History.
+	fromHistory := map[int]int{}
+	for _, p := range historyInOrder(t, store) {
+		fromHistory[p.EntryID]++
+	}
 	for _, e := range entries {
 		if e.PickCount != fromHistory[e.ID] {
 			t.Errorf("%s pick count = %d, but History has %d Picks", e.Name, e.PickCount, fromHistory[e.ID])
