@@ -45,8 +45,17 @@ type DrawResult struct {
 	EligiblePool int      `json:"eligible_pool"`
 }
 
-// EntryImport carries optional full state for import (nil = leave as-is).
-type EntryImport struct {
+// List is the named set of Entries a raffle draws from, as it crosses between
+// the List exchange (import/export), the handlers and the store.
+// An empty Name means "no name supplied": importing it keeps the current name.
+type List struct {
+	Name    string
+	Entries []ListEntry
+}
+
+// ListEntry is one Entry of a List. Nil PickCount/Excluded and a nil Tags
+// slice mean "not supplied": merging leaves the existing value as is.
+type ListEntry struct {
 	Name      string
 	PickCount *int
 	Excluded  *bool

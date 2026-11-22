@@ -1,0 +1,350 @@
+package handler_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// listEntry is one Entry as the entries endpoint reports it, reduced to the
+// fields a List carries.
+type listEntry struct {
+	Name      string   `json:"name"`
+	PickCount int      `json:"pick_count"`
+	Excluded  bool     `json:"excluded"`
+	Tags      []string `json:"tags"`
+}
+
+// listSnapshot is the List as seen through the List name and entries endpoints.
+type listSnapshot struct {
+	Name    string
+	Entries []listEntry
+}
+
+func readList(t *testing.T, ts *httptest.Server) listSnapshot {
+	t.Helper()
+	var name struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/list-name"), &name); err != nil {
+		t.Fatalf("list name: %v", err)
+	}
+	var entries []listEntry
+	if err := json.Unmarshal(bodyOf(t, ts, "/api/entries"), &entries); err != nil {
+		t.Fatalf("entries: %v", err)
+	}
+	for i := range entries {
+		if entries[i].Tags == nil {
+			entries[i].Tags = []string{}
+		}
+	}
+	return listSnapshot{Name: name.Name, Entries: entries}
+}
+
+// seedList builds a List through the entry, tag and List name endpoints.
+func seedList(t *testing.T, ts *httptest.Server, listName string, entries []listEntry) {
+	t.Helper()
+	putJSON(t, ts, "/api/list-name", jsonString(t, map[string]string{"name": listName}))
+	for _, e := range entries {
+		var created struct {
+			ID int `json:"id"`
+		}
+		res := postJSON(t, ts, "/api/entries", jsonString(t, map[string]string{"name": e.Name}))
+		if err := json.Unmarshal(res, &created); err != nil {
+			t.Fatalf("add entry: %v (%s)", err, res)
+		}
+		putJSON(t, ts, "/api/entries/"+itoa(created.ID), jsonString(t, map[string]any{
+			"pick_count": e.PickCount,
+			"excluded":   e.Excluded,
+		}))
+		for _, tag := range e.Tags {
+			postJSON(t, ts, "/api/entries/"+itoa(created.ID)+"/tags", jsonString(t, map[string]string{"name": tag}))
+		}
+	}
+}
+
+// clearList removes every Entry and resets the List name, as if the database
+// had been rebuilt.
+func clearList(t *testing.T, ts *httptest.Server) {
+	t.Helper()
+	reqJSON(t, ts, "DELETE", "/api/entries", "")
+	putJSON(t, ts, "/api/list-name", `{"name":"Entries"}`)
+}
+
+func jsonString(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// export downloads the List in the given format and returns the body and the
+// download file name.
+func export(t *testing.T, ts *httptest.Server, format string) ([]byte, string) {
+	t.Helper()
+	res := doReq(t, ts, "GET", "/api/export?format="+format, nil)
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("export %s = %d (%s)", format, res.StatusCode, body)
+	}
+	return body, res.Header.Get("Content-Disposition")
+}
+
+// importRaw posts content directly to the import endpoint.
+func importRaw(t *testing.T, ts *httptest.Server, contentType string, body []byte) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest("POST", ts.URL+"/api/import", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	return res.StatusCode, out
+}
+
+func mustImport(t *testing.T, ts *httptest.Server, contentType string, body []byte) {
+	t.Helper()
+	if status, out := importRaw(t, ts, contentType, body); status != http.StatusCreated {
+		t.Fatalf("import = %d (%s)", status, out)
+	}
+}
+
+func assertList(t *testing.T, got, want listSnapshot) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("List mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+// A List exercising everything the round trip must preserve. Entries are in
+// the order the entries endpoint lists them (by name); Tags are by name.
+var richList = listSnapshot{
+	Name: "Friday Raffle, \"Q4\"",
+	Entries: []listEntry{
+		{Name: "Alice", PickCount: 3, Excluded: false, Tags: []string{"TeamA", "VIP"}},
+		{Name: "Bob, Jr.", PickCount: 0, Excluded: true, Tags: []string{`back\slash`, "Red|Blue"}},
+		{Name: "Carol \"The Hammer\"", PickCount: 7, Excluded: false, Tags: []string{"a,b", "x\"y"}},
+		{Name: "Dan\nSecond line", PickCount: 1, Excluded: true, Tags: []string{"TeamA"}},
+	},
+}
+
+func TestListRoundTripJSON(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, richList.Name, richList.Entries)
+	assertList(t, readList(t, ts), richList)
+
+	first, _ := export(t, ts, "json")
+	clearList(t, ts)
+	mustImport(t, ts, "application/json", first)
+	assertList(t, readList(t, ts), richList)
+
+	second, _ := export(t, ts, "json")
+	if !bytes.Equal(first, second) {
+		t.Errorf("re-export differs\nfirst:  %s\nsecond: %s", first, second)
+	}
+}
+
+func TestListRoundTripCSV(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, richList.Name, richList.Entries)
+
+	first, _ := export(t, ts, "csv")
+	clearList(t, ts)
+	mustImport(t, ts, "text/csv", first)
+	assertList(t, readList(t, ts), richList)
+
+	second, _ := export(t, ts, "csv")
+	if !bytes.Equal(first, second) {
+		t.Errorf("re-export differs\nfirst:  %q\nsecond: %q", first, second)
+	}
+}
+
+func TestListRoundTripMultipartUpload(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, richList.Name, richList.Entries)
+
+	for _, format := range []string{"json", "csv"} {
+		exported, _ := export(t, ts, format)
+		clearList(t, ts)
+		uploadFile(t, ts, "list."+format, exported)
+		assertList(t, readList(t, ts), richList)
+	}
+}
+
+// uploadFile posts a file through the import dialog's multipart form.
+func uploadFile(t *testing.T, ts *httptest.Server, filename string, content []byte) {
+	t.Helper()
+	var buf bytes.Buffer
+	boundary := "goraffle-test-boundary"
+	buf.WriteString("--" + boundary + "\r\n")
+	buf.WriteString(`Content-Disposition: form-data; name="file"; filename="` + filename + "\"\r\n")
+	buf.WriteString("Content-Type: application/octet-stream\r\n\r\n")
+	buf.Write(content)
+	buf.WriteString("\r\n--" + boundary + "--\r\n")
+	mustImport(t, ts, "multipart/form-data; boundary="+boundary, buf.Bytes())
+}
+
+func TestExportFileNameFollowsListName(t *testing.T) {
+	ts := newTestServer(t)
+	putJSON(t, ts, "/api/list-name", `{"name":"Team Lunch"}`)
+	for format, want := range map[string]string{"json": `filename="Team_Lunch.json"`, "csv": `filename="Team_Lunch.csv"`} {
+		_, disposition := export(t, ts, format)
+		if !strings.Contains(disposition, want) {
+			t.Errorf("export %s Content-Disposition = %q, want %s", format, disposition, want)
+		}
+	}
+}
+
+// An import that fails in the database partway through changes nothing: not
+// the Entries before the failing one, and not the List name.
+func TestImportFailingInDatabaseChangesNothing(t *testing.T) {
+	ts := newTestServer(t)
+	before := listSnapshot{
+		Name:    "Keep Me",
+		Entries: []listEntry{{Name: "Existing", PickCount: 2, Excluded: false, Tags: []string{"Old"}}},
+	}
+	seedList(t, ts, before.Name, before.Entries)
+
+	// The last Entry's Pick count overflows the database column, so the
+	// import fails after the List name and the earlier Entries were written.
+	bad := `{"list_name":"Renamed","entries":[
+		{"name":"Existing","pick_count":9,"tags":["New"]},
+		{"name":"Fresh"},
+		{"name":"Overflow","pick_count":3000000000}
+	]}`
+	if status, out := importRaw(t, ts, "application/json", []byte(bad)); status < 400 {
+		t.Fatalf("failing import = %d (%s), want an error", status, out)
+	}
+	assertList(t, readList(t, ts), before)
+}
+
+func TestImportWithoutListNameKeepsCurrentName(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+	}{
+		"bare JSON names":          {"application/json", `["Ann","Ben"]`},
+		"JSON object without name": {"application/json", `{"entries":[{"name":"Ann"},{"name":"Ben"}]}`},
+		"CSV without name row":     {"text/csv", "name,pick_count,excluded,tags\nAnn,0,false,\nBen,0,false,\n"},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			putJSON(t, ts, "/api/list-name", `{"name":"Our List"}`)
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), listSnapshot{
+				Name: "Our List",
+				Entries: []listEntry{
+					{Name: "Ann", Tags: []string{}},
+					{Name: "Ben", Tags: []string{}},
+				},
+			})
+		})
+	}
+}
+
+func TestImportSupportedShapes(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		want        listSnapshot
+	}{
+		"legacy contestants key": {
+			"application/json",
+			`{"list_name":"Old Backup","contestants":[{"name":"Zed","pick_count":4,"excluded":true,"tags":["Alumni"]}]}`,
+			listSnapshot{Name: "Old Backup", Entries: []listEntry{{Name: "Zed", PickCount: 4, Excluded: true, Tags: []string{"Alumni"}}}},
+		},
+		"bare JSON names, sniffed": {
+			"",
+			`  ["Yan", " Xia "]`,
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Xia", Tags: []string{}}, {Name: "Yan", Tags: []string{}}}},
+		},
+		"JSON array of entry objects": {
+			"application/json",
+			`[{"name":"Wes","pick_count":1}]`,
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Wes", PickCount: 1, Tags: []string{}}}},
+		},
+		"CSV with name row, sniffed": {
+			"",
+			"list_name,Sheet\nname,pick_count,excluded,tags\nVic,2,true,A|B\n",
+			listSnapshot{Name: "Sheet", Entries: []listEntry{{Name: "Vic", PickCount: 2, Excluded: true, Tags: []string{"A", "B"}}}},
+		},
+		"hand-made CSV of names only": {
+			"text/csv",
+			"Uma\nTed\n",
+			listSnapshot{Name: "Entries", Entries: []listEntry{{Name: "Ted", Tags: []string{}}, {Name: "Uma", Tags: []string{}}}},
+		},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			clearList(t, ts)
+			mustImport(t, ts, c.contentType, []byte(c.body))
+			assertList(t, readList(t, ts), c.want)
+		})
+	}
+}
+
+// Merging by name only overwrites the fields the file supplies.
+func TestImportMergesOnlySuppliedFields(t *testing.T) {
+	ts := newTestServer(t)
+	seedList(t, ts, "Merge", []listEntry{
+		{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
+		{Name: "Ben", PickCount: 1, Excluded: false, Tags: []string{"Old"}},
+	})
+	mustImport(t, ts, "application/json", []byte(`["Ann"]`))
+	mustImport(t, ts, "application/json", []byte(`{"entries":[{"name":"ben","excluded":true,"tags":["New"]},{"name":"Cy"}]}`))
+	assertList(t, readList(t, ts), listSnapshot{
+		Name: "Merge",
+		Entries: []listEntry{
+			{Name: "Ann", PickCount: 5, Excluded: true, Tags: []string{"Keep"}},
+			{Name: "Ben", PickCount: 1, Excluded: true, Tags: []string{"New"}},
+			{Name: "Cy", Tags: []string{}},
+		},
+	})
+}
+
+func TestImportRejectsEmptyAndMalformedFiles(t *testing.T) {
+	cases := map[string]struct {
+		contentType string
+		body        string
+		wantError   string
+	}{
+		"empty body":            {"", "", "empty"},
+		"whitespace only":       {"text/csv", " \n\t\n", "empty"},
+		"malformed JSON":        {"application/json", `{"entries":[{"name":`, "invalid JSON"},
+		"malformed CSV":         {"text/csv", "name\n\"unterminated\n", "invalid CSV"},
+		"CSV header only":       {"text/csv", "list_name,X\nname,pick_count,excluded,tags\n", "no entries"},
+		"JSON object, no entry": {"application/json", `{"list_name":"X"}`, "no entries"},
+	}
+	for label, c := range cases {
+		t.Run(label, func(t *testing.T) {
+			ts := newTestServer(t)
+			before := listSnapshot{Name: "Untouched", Entries: []listEntry{{Name: "Ann", PickCount: 1, Tags: []string{}}}}
+			seedList(t, ts, before.Name, before.Entries)
+			status, out := importRaw(t, ts, c.contentType, []byte(c.body))
+			if status != http.StatusBadRequest {
+				t.Errorf("import = %d (%s), want 400", status, out)
+			}
+			if !strings.Contains(string(out), c.wantError) {
+				t.Errorf("import error = %s, want it to mention %q", out, c.wantError)
+			}
+			assertList(t, readList(t, ts), before)
+		})
+	}
+}

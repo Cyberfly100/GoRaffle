@@ -1,0 +1,320 @@
+// Package listexchange owns the file formats a List is exported to and
+// imported from: JSON and CSV, in every shape GoRaffle has ever written.
+//
+// It is pure: Decode turns uploaded bytes into a model.List and Encode turns a
+// model.List into bytes. Applying a decoded List to the database is the store's
+// job; reading the upload and writing the response is the handlers' job.
+//
+// Supported import shapes:
+//
+//   - JSON object: {"list_name": "...", "entries": [{name, pick_count, excluded, tags}]}
+//   - JSON object with the legacy "contestants" key instead of "entries"
+//   - JSON array of names: ["a", "b"]
+//   - JSON array of entry objects: [{"name": "a"}, ...]
+//   - CSV with an optional first row "list_name,<name>", an optional header
+//     row "name,pick_count,excluded,tags", then one row per Entry. Tags are
+//     separated by "|"; a literal "|" or "\" inside a Tag is escaped with "\".
+package listexchange
+
+import (
+	"bytes"
+	"encoding/csv"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/goraffle/raffle/internal/model"
+)
+
+// Format is an exchange file format.
+type Format string
+
+const (
+	JSON Format = "json"
+	CSV  Format = "csv"
+)
+
+// ParseFormat validates a format name such as the export's ?format= value.
+func ParseFormat(s string) (Format, error) {
+	switch Format(s) {
+	case JSON, CSV:
+		return Format(s), nil
+	}
+	return "", errors.New("format must be json or csv")
+}
+
+// Extension is the file extension (without dot) for the format.
+func (f Format) Extension() string { return string(f) }
+
+// ContentType is the MIME type a file in this format is served with.
+func (f Format) ContentType() string {
+	if f == CSV {
+		return "text/csv; charset=utf-8"
+	}
+	return "application/json"
+}
+
+// Decode turns an uploaded file into a List. contentTypeHint is the upload's
+// Content-Type, if any; "text/csv" and "application/json" force that format,
+// anything else is sniffed from the content. Names and Tags are trimmed.
+// The returned error describes what is wrong with the file.
+func Decode(body []byte, contentTypeHint string) (model.List, error) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return model.List{}, errors.New("file is empty")
+	}
+	var (
+		l   model.List
+		err error
+	)
+	switch {
+	case strings.Contains(contentTypeHint, "text/csv"):
+		l, err = decodeCSV(body)
+	case strings.Contains(contentTypeHint, "application/json"), looksLikeJSON(body):
+		l, err = decodeJSON(body)
+	default:
+		l, err = decodeCSV(body)
+	}
+	if err != nil {
+		return model.List{}, err
+	}
+	return normalize(l), nil
+}
+
+func looksLikeJSON(body []byte) bool {
+	t := bytes.TrimSpace(body)
+	return len(t) > 0 && (t[0] == '[' || t[0] == '{')
+}
+
+// normalize trims names and Tags and drops nameless Entries and empty Tags.
+func normalize(l model.List) model.List {
+	l.Name = strings.TrimSpace(l.Name)
+	out := make([]model.ListEntry, 0, len(l.Entries))
+	for _, e := range l.Entries {
+		e.Name = strings.TrimSpace(e.Name)
+		if e.Name == "" {
+			continue
+		}
+		var tags []string
+		for _, t := range e.Tags {
+			if t = strings.TrimSpace(t); t != "" {
+				tags = append(tags, t)
+			}
+		}
+		e.Tags = tags
+		out = append(out, e)
+	}
+	l.Entries = out
+	return l
+}
+
+// jsonEntry is one Entry in the JSON format.
+type jsonEntry struct {
+	Name      string   `json:"name"`
+	PickCount *int     `json:"pick_count,omitempty"`
+	Excluded  *bool    `json:"excluded,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+}
+
+// jsonList is the JSON export layout. Field order fixes the byte layout.
+type jsonList struct {
+	Entries  []jsonEntry `json:"entries"`
+	ListName string      `json:"list_name"`
+}
+
+func decodeJSON(body []byte) (model.List, error) {
+	var obj struct {
+		ListName string      `json:"list_name"`
+		Entries  []jsonEntry `json:"entries"`
+		Legacy   []jsonEntry `json:"contestants"`
+	}
+	if err := json.Unmarshal(body, &obj); err == nil {
+		rows := append(obj.Entries, obj.Legacy...)
+		if len(rows) == 0 {
+			return model.List{}, errors.New(`JSON contained no entries under "entries" (or legacy "contestants")`)
+		}
+		return model.List{Name: obj.ListName, Entries: fromJSON(rows)}, nil
+	}
+	var names []string
+	if err := json.Unmarshal(body, &names); err == nil {
+		if len(names) == 0 {
+			return model.List{}, errors.New("JSON contained no entry names")
+		}
+		entries := make([]model.ListEntry, 0, len(names))
+		for _, n := range names {
+			entries = append(entries, model.ListEntry{Name: n})
+		}
+		return model.List{Entries: entries}, nil
+	}
+	var rows []jsonEntry
+	if err := json.Unmarshal(body, &rows); err == nil {
+		if len(rows) == 0 {
+			return model.List{}, errors.New("JSON contained no entries")
+		}
+		return model.List{Entries: fromJSON(rows)}, nil
+	}
+	return model.List{}, errors.New(`invalid JSON: expected {list_name:string, entries:[...]} (or legacy {contestants:[...]}), ["a","b"] or [{...}]`)
+}
+
+func fromJSON(rows []jsonEntry) []model.ListEntry {
+	out := make([]model.ListEntry, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, model.ListEntry(r))
+	}
+	return out
+}
+
+func decodeCSV(body []byte) (model.List, error) {
+	r := csv.NewReader(bytes.NewReader(body))
+	// The list_name row is narrower than the header and Entry rows.
+	r.FieldsPerRecord = -1
+	records, err := r.ReadAll()
+	if err != nil {
+		return model.List{}, fmt.Errorf("invalid CSV: %w", err)
+	}
+
+	var l model.List
+	i := 0
+	if i < len(records) && strings.EqualFold(strings.TrimSpace(records[i][0]), "list_name") {
+		if len(records[i]) > 1 {
+			l.Name = records[i][1]
+		}
+		i++
+	}
+	if i < len(records) && strings.EqualFold(strings.TrimSpace(records[i][0]), "name") {
+		i++ // column header
+	}
+	for ; i < len(records); i++ {
+		rec := records[i]
+		e := model.ListEntry{Name: rec[0]}
+		if len(rec) > 1 {
+			if n, err := strconv.Atoi(strings.TrimSpace(rec[1])); err == nil {
+				e.PickCount = &n
+			}
+		}
+		if len(rec) > 2 {
+			if b, err := strconv.ParseBool(strings.TrimSpace(rec[2])); err == nil {
+				e.Excluded = &b
+			}
+		}
+		if len(rec) > 3 {
+			e.Tags = splitTags(rec[3])
+		}
+		l.Entries = append(l.Entries, e)
+	}
+	if len(normalize(l).Entries) == 0 {
+		return model.List{}, errors.New("CSV contained no entries")
+	}
+	return l, nil
+}
+
+// splitTags splits a CSV Tags cell on unescaped "|", undoing "\" escapes.
+func splitTags(cell string) []string {
+	var tags []string
+	var cur strings.Builder
+	escaped := false
+	for _, r := range cell {
+		switch {
+		case escaped:
+			cur.WriteRune(r)
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == '|':
+			tags = append(tags, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	if escaped {
+		cur.WriteRune('\\')
+	}
+	return append(tags, cur.String())
+}
+
+var tagEscaper = strings.NewReplacer(`\`, `\\`, `|`, `\|`)
+
+func joinTags(tags []string) string {
+	esc := make([]string, len(tags))
+	for i, t := range tags {
+		esc[i] = tagEscaper.Replace(t)
+	}
+	return strings.Join(esc, "|")
+}
+
+// Encode turns a List into a file in the given format. Absent PickCount and
+// Excluded are written as 0 and false.
+func Encode(l model.List, f Format) ([]byte, error) {
+	switch f {
+	case JSON:
+		return encodeJSON(l)
+	case CSV:
+		return encodeCSV(l)
+	}
+	return nil, fmt.Errorf("unknown format %q", f)
+}
+
+func encodeJSON(l model.List) ([]byte, error) {
+	out := jsonList{ListName: l.Name, Entries: make([]jsonEntry, 0, len(l.Entries))}
+	for _, e := range l.Entries {
+		out.Entries = append(out.Entries, jsonEntry{
+			Name:      e.Name,
+			PickCount: intOr(e.PickCount, 0),
+			Excluded:  boolOr(e.Excluded, false),
+			Tags:      e.Tags,
+		})
+	}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(out); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func encodeCSV(l model.List) ([]byte, error) {
+	rows := make([][]string, 0, len(l.Entries)+2)
+	rows = append(rows,
+		[]string{"list_name", l.Name},
+		[]string{"name", "pick_count", "excluded", "tags"})
+	for _, e := range l.Entries {
+		rows = append(rows, []string{
+			e.Name,
+			strconv.Itoa(*intOr(e.PickCount, 0)),
+			strconv.FormatBool(*boolOr(e.Excluded, false)),
+			joinTags(e.Tags),
+		})
+	}
+	return WriteCSV(nil, rows)
+}
+
+// WriteCSV renders an optional header row and data rows as CSV. It is shared
+// with the History export.
+func WriteCSV(header []string, rows [][]string) ([]byte, error) {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if len(header) > 0 {
+		if err := w.Write(header); err != nil {
+			return nil, err
+		}
+	}
+	if err := w.WriteAll(rows); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func intOr(p *int, def int) *int {
+	if p != nil {
+		return p
+	}
+	return &def
+}
+
+func boolOr(p *bool, def bool) *bool {
+	if p != nil {
+		return p
+	}
+	return &def
+}

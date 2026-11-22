@@ -31,11 +31,15 @@ func (s *Store) GetListName(ctx context.Context) (string, error) {
 
 // SetListName updates the list name in settings.
 func (s *Store) SetListName(ctx context.Context, name string) error {
+	return setListName(ctx, s.DB, name)
+}
+
+func setListName(ctx context.Context, q querier, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Entries"
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := q.ExecContext(ctx, `
 		INSERT INTO settings (key, value) VALUES ('list_name', $1)
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, name)
 	return err
@@ -421,17 +425,48 @@ func (s *Store) ListHistory(ctx context.Context) ([]model.Pick, error) {
 	return out, rows.Err()
 }
 
-// ImportEntries upserts entries by name inside one transaction.
-// Returns counts of added and updated rows. Existing names' count/excluded are
-// updated only when the import supplies them; tags are replaced when supplied.
-func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (added, updated int, err error) {
+// ReadList returns the List: its name and every Entry with its Pick count,
+// Excluded flag and Tags, ordered by name.
+func (s *Store) ReadList(ctx context.Context) (model.List, error) {
+	name, err := s.GetListName(ctx)
+	if err != nil {
+		return model.List{}, err
+	}
+	entries, err := s.ListEntries(ctx)
+	if err != nil {
+		return model.List{}, err
+	}
+	l := model.List{Name: name, Entries: make([]model.ListEntry, 0, len(entries))}
+	for _, e := range entries {
+		l.Entries = append(l.Entries, model.ListEntry{
+			Name:      e.Name,
+			PickCount: &e.PickCount,
+			Excluded:  &e.Excluded,
+			Tags:      e.Tags,
+		})
+	}
+	return l, nil
+}
+
+// ApplyList merges an imported List into the database in one transaction:
+// either all of it lands or none of it does. The List name is set only when
+// the List carries one. Entries are matched by name; new ones are added, and
+// existing ones get Pick count and Excluded only where the List supplies them.
+// Tags are replaced when supplied, created as needed.
+func (s *Store) ApplyList(ctx context.Context, l model.List) (added, updated int, err error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	for _, ci := range in {
+	if strings.TrimSpace(l.Name) != "" {
+		if err := setListName(ctx, tx, l.Name); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	for _, ci := range l.Entries {
 		name := strings.TrimSpace(ci.Name)
 		if name == "" {
 			continue
@@ -444,7 +479,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 		if errors.Is(err, sql.ErrNoRows) {
 			exists = false
 		} else if err != nil {
-			return added, updated, err
+			return 0, 0, err
 		}
 
 		count := 0
@@ -457,7 +492,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 				 VALUES ($1, $2, $3) RETURNING id`,
 				name, count, boolOr(ci.Excluded, false)).Scan(&id)
 			if err != nil {
-				return added, updated, err
+				return 0, 0, err
 			}
 			added++
 		} else {
@@ -470,7 +505,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 					 WHERE id = $1`,
 					id, ci.PickCount, ci.Excluded)
 				if err != nil {
-					return added, updated, err
+					return 0, 0, err
 				}
 			}
 			updated++
@@ -478,7 +513,7 @@ func (s *Store) ImportEntries(ctx context.Context, in []model.EntryImport) (adde
 
 		if len(ci.Tags) > 0 {
 			if err := s.SetEntryTags(ctx, tx, id, ci.Tags); err != nil {
-				return added, updated, err
+				return 0, 0, err
 			}
 		}
 	}
