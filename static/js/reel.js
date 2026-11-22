@@ -5,10 +5,10 @@
 //
 // Interface:
 //   const reel = createReel({ orientation: "horizontal" | "vertical" });
-//   reel.suspense(names)     start a Suspense (queued behind a running Reveal)
-//   reel.land(winnerName)    land the running (or oldest queued) Suspense on
-//                            the winner; with no Suspense waiting, show the
-//                            winner on the resting Reel directly
+//   reel.reveal(names, winnerName)
+//                            play a Reveal: a Suspense over `names`, then the
+//                            landing on the winner (queued behind a running
+//                            Reveal). The Reel alone decides how long it takes.
 //   reel.busy()              true from a Suspense until the Reel is idle again
 //   reel.onSpeed(fn)         fn({ speed, cells }) on every frame the belt moves
 //                            (speed in px/ms; cells = cells passed, for ticks),
@@ -21,23 +21,22 @@
 //                            re-rendered (the vertical drum's neighbour rows)
 //
 // Phases: idle -> windup -> cruising -> landing -> idle, or idle -> reduced
-// -> idle with reduced motion. A Suspense that arrives while busy is queued
-// with its winner and played after the current landing finishes.
+// -> idle with reduced motion. A Reveal that arrives while busy is queued and
+// played after the current landing finishes.
+//
+// These constants are the only definition of a Reveal's length (the server's
+// replay window in internal/handler/replay.go is sized from them).
 import { planLanding, HORIZONTAL, VERTICAL } from "./reel-plan.js";
 import { confettiBurst } from "./confetti.js";
 
 // Belt speed is a constant px/ms so the Reel reads the same however wide the
 // names make the cells, and so the landing can hand over without a jump in
-// speed. Wind-up + cruise fill the server's Suspense (suspenseTotal in
-// draw.go), then the landing runs.
+// speed. Wind-up + cruise fill the Suspense, then the landing runs.
 export const CRUISE_SPEED = 4.35;
 export const LANDING_MS = 1800;
 const WINDUP_MS = 900;
-// How long a queued Suspense whose winner is already known spins before it
-// lands: the same as the server's Suspense.
-const QUEUED_SUSPENSE_MS = 2000;
-// Give up on a Suspense whose winner never arrives.
-const WINNER_TIMEOUT_MS = 6000;
+// How long the belt spins (wind-up included) before it starts landing.
+export const SUSPENSE_MS = 2000;
 // The landed winner stays on the belt this long before the Reel is idle.
 const SETTLE_MS = 420;
 const MIN_LANDING_SPEED = 0.15;
@@ -47,7 +46,7 @@ const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)"
 export function createReel({ orientation = "horizontal" } = {}) {
   let phase = "idle";
   let current = null; // { names, winner } being revealed
-  const queue = []; // pending { names, winner }; names null = winner only
+  const queue = []; // pending { names, winner }
   let timers = [];
   let raf = null;
   let speed = { value: 0, at: 0 };
@@ -87,23 +86,23 @@ export function createReel({ orientation = "horizontal" } = {}) {
   }
 
   /* ---------- Suspense ---------- */
-  function suspense(names) {
-    if (!names || names.length === 0) return;
+  function reveal(names, winner) {
+    if (!winner) return;
+    const item = { names: names && names.length ? names : [winner], winner };
     if (busy()) {
-      queue.push({ names, winner: null });
+      queue.push(item);
       return;
     }
-    play({ names, winner: null });
+    play(item);
   }
 
   function play(item) {
     current = item;
     const { reel, track, label, sub } = parts();
     if (!reel || !track) {
-      // Nothing to spin on: reveal the winner (if known) without motion.
+      // Nothing to spin on: reveal the winner without motion.
       phase = "reduced";
-      if (item.winner) later(landCurrent, 0);
-      else later(giveUp, WINNER_TIMEOUT_MS);
+      later(landCurrent, 0);
       return;
     }
     clearTimers();
@@ -117,13 +116,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
     } else {
       startSpin(reel, track, item.names);
     }
-    if (item.winner) later(landCurrent, phase === "reduced" ? 0 : QUEUED_SUSPENSE_MS);
-    else later(giveUp, WINNER_TIMEOUT_MS);
-  }
-
-  // The winner never came: stop and let the page re-render.
-  function giveUp() {
-    if (current && current.winner === null) finish();
+    later(landCurrent, phase === "reduced" ? 0 : SUSPENSE_MS);
   }
 
   function startSpin(reel, track, names) {
@@ -248,27 +241,6 @@ export function createReel({ orientation = "horizontal" } = {}) {
   }
 
   /* ---------- Landing ---------- */
-  function land(winner) {
-    if (!winner) return;
-    if (current && current.winner === null && busy() && phase !== "landing") {
-      current.winner = winner;
-      landCurrent();
-      return;
-    }
-    const waiting = queue.find((q) => q.names && q.winner === null);
-    if (waiting) {
-      waiting.winner = winner;
-      return;
-    }
-    // No Suspense for this winner.
-    if (busy()) {
-      queue.push({ names: null, winner });
-      return;
-    }
-    showResting(winner);
-    emitIdle();
-  }
-
   function landCurrent() {
     clearTimers();
     const winner = current.winner;
@@ -330,13 +302,9 @@ export function createReel({ orientation = "horizontal" } = {}) {
     phase = "idle";
     current = null;
     spin = null;
-    while (queue.length) {
-      const next = queue.shift();
-      if (next.names) {
-        play(next);
-        return;
-      }
-      showResting(next.winner);
+    if (queue.length) {
+      play(queue.shift());
+      return;
     }
     emitIdle();
   }
@@ -444,8 +412,7 @@ export function createReel({ orientation = "horizontal" } = {}) {
   }
 
   return {
-    suspense,
-    land,
+    reveal,
     busy,
     onSpeed: (fn) => speedListeners.push(fn),
     onIdle: (fn) => idleListeners.push(fn),

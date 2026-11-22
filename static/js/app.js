@@ -2,7 +2,6 @@
 // glue between the websocket, the Draw button and the Reel.
 import * as ws from "./ws.js";
 import { createReel } from "./reel.js";
-import { confettiBurst } from "./confetti.js";
 import { audioCtx, bindSoundToggle, followReel, soundOn } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -68,11 +67,16 @@ followReel(reel);
 
 /* ---------- Partial refresh ---------- */
 // Fetch-based refresh: independent of any CDN so partials always re-render.
+// Regions that would show the winner (or tear down the Reel) before it has
+// landed. While the Reel is busy their refreshes are held back; the Reel's
+// idle notification applies them (refreshPartials) once it has landed.
+const HELD_DURING_REVEAL = new Set(["#result", "#history", "#entry-table"]);
+const heldBack = (selector) => HELD_DURING_REVEAL.has(selector) && reel.busy();
+
 async function swapPartial(url, selector) {
-  // Never tear down the Reel mid-Reveal; it asks for a refresh when idle.
   // Asked again once the response is in: a refresh fetched just before a
   // spin must not land during it.
-  if (selector === "#result" && reel.busy()) return;
+  if (heldBack(selector)) return;
   if (!document.querySelector(selector)) return;
   let resp;
   try {
@@ -82,7 +86,7 @@ async function swapPartial(url, selector) {
   }
   if (!resp.ok) return;
   const html = await resp.text();
-  if (selector === "#result" && reel.busy()) return;
+  if (heldBack(selector)) return;
   const target = document.querySelector(selector);
   if (!target) return;
   const wrap = document.createElement("template");
@@ -168,12 +172,9 @@ function refreshIfNoWS() {
 
 
 /* ---------- Draw ---------- */
-// Draw is disabled from the click until the Reel is idle again (or the
-// request fails), and whenever the Reel is busy with anyone's Reveal.
+// Draw is disabled from the click until the Reveal starts, then while the
+// Reel is busy with anyone's Reveal.
 let drawPending = false;
-let drawPendingTimer = null;
-// If no Suspense ever reaches this browser, don't leave Draw stuck.
-const DRAW_PENDING_MS = 4000;
 
 function syncDrawBtn() {
   const btn = $("#draw-btn");
@@ -182,13 +183,6 @@ function syncDrawBtn() {
 
 function setDrawPending(pending) {
   drawPending = pending;
-  clearTimeout(drawPendingTimer);
-  if (pending) {
-    drawPendingTimer = setTimeout(() => {
-      drawPending = false;
-      syncDrawBtn();
-    }, DRAW_PENDING_MS);
-  }
   syncDrawBtn();
 }
 
@@ -221,26 +215,29 @@ async function doDraw() {
     setDrawPending(false);
     return null;
   }
-  // When the socket is live, Suspense + winner arrive via WS and the Reel
-  // re-enables Draw once it is idle.
-  if (!ws.connected()) {
-    fallbackRenderWinner(data);
-    setDrawPending(false);
-  }
+  // The response is the same Reveal the websocket carries: play whichever
+  // arrives first, so the Draw works without a websocket too.
+  playReveal(data);
+  setDrawPending(false);
   return data;
 }
 
-function fallbackRenderWinner(data) {
-  refreshPartials();
-  if (data?.winner?.name) {
-    toast(`The winner is ${data.winner.name}`);
-    // No socket means no Reel, but this is still the moment of reveal.
-    confettiBurst($("#result .reel") || $("#result"));
-  }
+/* ---------- Reveal ---------- */
+// Each Reveal plays once in this browser, identified by its Pick id, however
+// many times it arrives (HTTP response, websocket event, replay on connect).
+const playedPicks = new Set();
+
+function playReveal(reveal) {
+  const winner = reveal && reveal.winner && reveal.winner.name;
+  if (!winner || playedPicks.has(reveal.pick_id)) return;
+  playedPicks.add(reveal.pick_id);
+  reel.reveal(reveal.suspense_names, winner);
+  syncDrawBtn();
 }
 
 reel.onIdle(() => {
   setDrawPending(false);
+  // Applies the refreshes held back during the Reveal, and shows its Pick.
   refreshPartials();
 });
 
@@ -632,11 +629,7 @@ function updateEligibility() {
 
 /* ---------- WS events ---------- */
 function bindWS() {
-  ws.on("suspense", (data) => {
-    reel.suspense(data && data.names);
-    syncDrawBtn();
-  });
-  ws.on("winner", (data) => reel.land(data && data.winner && data.winner.name));
+  ws.on("reveal", playReveal);
   ws.on("undo", () => refreshPartials());
   ws.on("entries", () => refreshPartials());
 }
