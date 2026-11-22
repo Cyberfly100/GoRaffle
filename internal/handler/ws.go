@@ -14,6 +14,10 @@ func (s *Server) wsUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := ws.NewClient(s.hub, conn)
+	// A browser (re)connecting during a Reveal plays it too.
+	if msg := s.lastReveal.replay(); msg != nil {
+		client.Send(msg)
+	}
 	s.hub.Register(client)
 	go client.WritePump()
 	go client.ReadPump()

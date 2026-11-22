@@ -166,6 +166,54 @@ async function history(request) {
   return (await request.get("/api/history")).json();
 }
 
+// The names in the Pick History card, newest first, as rendered.
+async function historyNames(page) {
+  return page.locator("#history .history-name").allTextContents();
+}
+
+// The Pick counts shown in the Entries table, by Entry name.
+async function pickCountsInTable(page) {
+  return page.locator("#entry-table [data-id]").evaluateAll((rows) =>
+    Object.fromEntries(
+      rows.map((r) => [r.querySelector('[data-field="name"]').value, Number(r.querySelector('[data-field="pick_count"]').value)])
+    )
+  );
+}
+
+// True if the Reel's belt does not move for `ms`. A re-rendered result (a
+// new belt in place) is not motion; a spin is.
+async function reelStaysStill(page, ms) {
+  return page.evaluate(
+    (ms) =>
+      new Promise((resolve) => {
+        let belt = null;
+        let at = null;
+        const end = performance.now() + ms;
+        const step = () => {
+          const now = document.querySelector("#result .reel-track");
+          const r = now && now.getBoundingClientRect();
+          const pos = r && `${r.left.toFixed(1)}:${r.top.toFixed(1)}`;
+          if (now === belt && pos !== at) return resolve(false);
+          belt = now;
+          at = pos;
+          if (performance.now() > end) return resolve(true);
+          requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+    ms
+  );
+}
+
+// The server replays a Reveal to browsers that connect within 6s of it.
+const REPLAY_WINDOW_MS = 6000;
+
+// Waits until a Draw made at `drawnAt` (Date.now()) can no longer be replayed.
+async function waitOutReplayWindow(page, drawnAt) {
+  const left = drawnAt + REPLAY_WINDOW_MS + 500 - Date.now();
+  if (left > 0) await page.waitForTimeout(left);
+}
+
 // Keeps the page from ever getting a live websocket.
 async function blockWebSocket(page) {
   await page.routeWebSocket(/\/ws$/, (ws) => ws.close());
@@ -290,6 +338,10 @@ module.exports = {
   renameList,
   restingReel,
   blockWebSocket,
+  historyNames,
+  pickCountsInTable,
+  reelStaysStill,
+  waitOutReplayWindow,
   nextLanding,
   reelMoving,
   clickDraw,
