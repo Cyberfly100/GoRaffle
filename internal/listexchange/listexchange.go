@@ -155,13 +155,16 @@ type jsonList struct {
 	Picks    []jsonPick  `json:"picks"`
 }
 
+// jsonImport is every JSON shape the Import has accepted as an object: the
+// jsonList export layout plus the legacy "contestants" key. Decoding into it
+// keeps the export layout and the decode layout from drifting apart.
+type jsonImport struct {
+	jsonList
+	Legacy []jsonEntry `json:"contestants"`
+}
+
 func decodeJSON(body []byte) (model.List, error) {
-	var obj struct {
-		ListName string      `json:"list_name"`
-		Entries  []jsonEntry `json:"entries"`
-		Legacy   []jsonEntry `json:"contestants"`
-		Picks    []jsonPick  `json:"picks"`
-	}
+	var obj jsonImport
 	if err := json.Unmarshal(body, &obj); err == nil {
 		rows := append(obj.Entries, obj.Legacy...)
 		if len(rows) == 0 {
