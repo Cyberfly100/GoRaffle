@@ -520,9 +520,12 @@ function openImportConfirm(file) {
   // the old Tags and can be corrected by importing again.
   const tags = $("#remove-unused-tags");
   if (tags) tags.checked = false;
-  // Export current List first must offer the List as the host sees it, so
-  // its link is rewritten from the List name field like every export link.
-  updateExportLinks($("#list-name")?.value || "");
+  // Export current List first must offer the List as the host sees it. It
+  // rewrites its own link, not the data-export-format one in the Import /
+  // Export dialog, which stays the page's single advertised export.
+  const name = ($("#list-name")?.value || "").trim() || "raffle";
+  const exportFirst = $("#export-first");
+  if (exportFirst) exportFirst.href = `/api/export?format=json&name=${encodeURIComponent(name)}`;
   dialog.showModal();
 }
 
