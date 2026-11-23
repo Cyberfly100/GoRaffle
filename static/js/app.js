@@ -310,7 +310,7 @@ function bindRowEvents() {
       const nameEl = $("#file-chosen");
       if (nameEl) nameEl.textContent = file ? file.name : "No file chosen";
       // Choosing a file is the whole gesture: the warning opens right away,
-      // and its Import button is the only way the upload happens.
+      // and its Import button is the only way the import request is sent.
       if (file) openImportConfirm(file);
     }
   });
@@ -506,8 +506,8 @@ async function doReset() {
 }
 
 /* ---------- Import / Export ---------- */
-// The Import confirmation: choosing a file opens the warning, and the upload
-// only happens on its Import button.
+// The Import confirmation: choosing a file opens the warning, and the import
+// request is only sent from its Import button.
 let importPending = null; // the File awaiting confirmation
 
 function openImportConfirm(file) {
