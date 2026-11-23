@@ -16,6 +16,12 @@ func boolOr(b *bool, def bool) bool {
 	return def
 }
 
+// entryKey is an Entry name's identity when a Pick is matched to its Entry:
+// trimmed and case-folded.
+func entryKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
 // ImportOptions are the Import's only options: a direct request replaces
 // at once, with no confirmation flag.
 type ImportOptions struct {
@@ -61,7 +67,7 @@ func (s *Store) ImportList(ctx context.Context, l model.List, opts ImportOptions
 	// The file's Entries by name, case-insensitive.
 	byKey := make(map[string]int, len(l.Entries))
 	for i, e := range l.Entries {
-		byKey[strings.ToLower(strings.TrimSpace(e.Name))] = i
+		byKey[entryKey(e.Name)] = i
 	}
 
 	// The file's order of the Picks: Pick number first, ties by time.
@@ -80,7 +86,7 @@ func (s *Store) ImportList(ctx context.Context, l model.List, opts ImportOptions
 	var missing MissingEntriesError
 	missingSeen := make(map[string]bool)
 	for _, p := range picks {
-		idx, ok := byKey[strings.ToLower(strings.TrimSpace(p.EntryName))]
+		idx, ok := byKey[entryKey(p.EntryName)]
 		if !ok {
 			missing.Picks++
 			key := strings.ToLower(p.EntryName)
@@ -128,7 +134,7 @@ func (s *Store) ImportList(ctx context.Context, l model.List, opts ImportOptions
 			}
 		}
 		for n, p := range kept {
-			idx := byKey[strings.ToLower(strings.TrimSpace(p.EntryName))]
+			idx := byKey[entryKey(p.EntryName)]
 			if _, err := tx.tx.ExecContext(ctx,
 				`INSERT INTO picks (entry_id, pick_number, picked_at) VALUES ($1, $2, $3)`,
 				ids[idx], n+1, p.PickedAt); err != nil {
