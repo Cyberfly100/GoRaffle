@@ -200,6 +200,7 @@ test.describe("the import form", () => {
     const section = page.locator("#import-export");
     await expect(section).toContainText("List file");
     await expect(section).not.toContainText(/csv/i);
+    await expect(page.locator("#import-export .export-row a")).toHaveText("Export");
   });
 });
 
