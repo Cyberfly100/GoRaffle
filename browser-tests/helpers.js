@@ -246,6 +246,13 @@ async function availableTags(page) {
   return names;
 }
 
+// The colour the Tag's pill is actually painted with, the way the host
+// sees it (the browser's computed style, after any fade).
+async function tagBubbleBackground(page, tagName) {
+  const bubble = page.locator(`#entry-table .tag-bubble[data-tag="${tagName.replace(/"/g, '\\"')}"]`).first();
+  return bubble.evaluate((el) => getComputedStyle(el).backgroundColor);
+}
+
 const exactly = (text) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 
 // The table row of the Entry the server knows by this name.
@@ -407,6 +414,7 @@ module.exports = {
   csvFile,
   toast,
   availableTags,
+  tagBubbleBackground,
   entryNamesInTable,
   exportLinkNames,
   renameList,

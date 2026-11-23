@@ -130,7 +130,9 @@
   --accent-hover: #57534e;
   --pot-mark: #b45309;
   --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.08);
-  /* Muted tag palette (light) */
+  /* Muted tag palette (light) - all 24, so a dark-system host choosing light
+     sees pastels everywhere: the media query's dark values win over :root's
+     pastels, so every slot must be redeclared here. */
   --tag-color-0: #dbeafe;
   --tag-color-1: #ccfbf1;
   --tag-color-2: #fef3c7;
@@ -139,6 +141,22 @@
   --tag-color-5: #dcfce7;
   --tag-color-6: #fef9c3;
   --tag-color-7: #e2e8f0;
+  --tag-color-8: #fce7f3;
+  --tag-color-9: #ffedd5;
+  --tag-color-10: #ecfdf5;
+  --tag-color-11: #faf5ff;
+  --tag-color-12: #f0fdf4;
+  --tag-color-13: #fff7ed;
+  --tag-color-14: #f8fafc;
+  --tag-color-15: #fdf4ff;
+  --tag-color-16: #e0f2fe;
+  --tag-color-17: #fefce8;
+  --tag-color-18: #fff1f2;
+  --tag-color-19: #f3f4f6;
+  --tag-color-20: #eef2ff;
+  --tag-color-21: #f0f9ff;
+  --tag-color-22: #fef0e2;
+  --tag-color-23: #fae8ff;
 }
 
 /* ===== Base ===== */
@@ -528,9 +546,29 @@ input {
   color: var(--text-secondary);
 }
 
-[data-theme="light"] .icon-theme-moon,
+/* The toggle's icon follows the theme in effect — the explicitly chosen one,
+   or the system's when on auto: sun alone when light, moon alone when dark
+   (the same convention as the reel toggle's orientation icon). */
+.icon-theme-moon {
+  display: none;
+}
+
 [data-theme="dark"] .icon-theme-sun {
   display: none;
+}
+
+[data-theme="dark"] .icon-theme-moon {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .icon-theme-sun {
+    display: none;
+  }
+
+  html:not([data-theme="light"]) .icon-theme-moon {
+    display: block;
+  }
 }
 
 .btn-small {
