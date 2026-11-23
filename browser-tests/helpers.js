@@ -181,6 +181,12 @@ async function pickCountsInTable(page) {
   );
 }
 
+// Clicks Reset and confirms it, as the host does.
+async function clickReset(page) {
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#reset-btn").click();
+}
+
 // True if the Reel's belt does not move for `ms`. A re-rendered result (a
 // new belt in place) is not motion; a running Reel is.
 async function reelStaysStill(page, ms) {
@@ -322,7 +328,8 @@ async function chooseFilterTag(page, zone, tag) {
 }
 
 // What the table shows for the next Draw: the names highlighted as in the
-// Eligible pool and the names marked as in the Pot, each sorted.
+// Eligible pool and the names marked as in the Pot, each sorted. The Pot is
+// marked only while it is smaller than the Eligible pool.
 async function tableMarking(page) {
   return page.locator("#entry-table [data-id]").evaluateAll((rows) => {
     const name = (r) => r.querySelector('textarea[data-field="name"]').value;
@@ -394,6 +401,7 @@ async function cruisingNamesPerSecond(page, { fromMs = 1000, toMs = 1700 } = {})
 }
 
 module.exports = {
+  clickReset,
   cruisingNamesPerSecond,
   chooseFilterTag,
   tableMarking,

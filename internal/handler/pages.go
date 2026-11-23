@@ -28,6 +28,18 @@ type pageData struct {
 	ListName string
 }
 
+// MarkPot reports whether the table marks the Pot: only when it is smaller
+// than the Eligible pool. When every eligible Entry is in the Pot (after a
+// Reset, at the start of a Season) nobody is marked as in the Pot.
+func (d pageData) MarkPot() bool {
+	for _, e := range d.Entries {
+		if e.Eligible && !e.InPot {
+			return true
+		}
+	}
+	return false
+}
+
 // tagPalette is a muted pastel set; index = hash(name) % len.
 var tagPalette = []string{
 	"tc-0", "tc-1", "tc-2", "tc-3",

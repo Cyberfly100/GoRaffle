@@ -146,6 +146,8 @@ func TestEveryTagChipCarriesItsColour(t *testing.T) {
 	}
 }
 
+// The Pot is marked only when it is smaller than the Eligible pool: when every
+// eligible Entry is in it, the mark would single nobody out.
 func TestTableMarksThePotOfTheEligiblePool(t *testing.T) {
 	ts := newTestServer(t)
 	seedList(t, ts, "Team", []listEntry{
@@ -176,9 +178,10 @@ func TestTableMarksThePotOfTheEligiblePool(t *testing.T) {
 		})
 	}
 
-	// Once Dee is picked the frontend Pot is everyone on two Picks.
+	// Once Dee is picked the frontend Pot is the whole frontend Eligible pool
+	// (Dee and Fin on two Picks), so nobody is marked as in the Pot.
 	postJSON(t, ts, "/api/draw", `{"must_have":["frontend"]}`)
-	if got := marked(tableFor(t, ts, []string{"frontend"}, nil), inPot); !reflect.DeepEqual(got, []string{"Dee", "Fin"}) {
-		t.Errorf("after a Draw, in Pot = %v, want [Dee Fin]", got)
+	if got := marked(tableFor(t, ts, []string{"frontend"}, nil), inPot); !reflect.DeepEqual(got, []string{}) {
+		t.Errorf("after a Draw, marked as in Pot = %v, want none", got)
 	}
 }

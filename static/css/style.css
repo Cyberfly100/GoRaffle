@@ -8,7 +8,7 @@
   --border: #e7e5e4;
   --accent: #78716c;
   --accent-hover: #57534e;
-  --pot-mark: #b45309;
+  --pot-tint: rgba(99, 102, 241, 0.11);
   --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.08);
   --radius-lg: 12px;
   --radius-md: 8px;
@@ -50,7 +50,7 @@
     --border: #44403c;
     --accent: #a8a29e;
     --accent-hover: #d6d3d1;
-    --pot-mark: #fbbf24;
+    --pot-tint: rgba(255, 255, 255, 0.06);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
     /* Muted tag palette (dark) - 24 colors */
     --tag-color-0: #1e3a5f;
@@ -90,7 +90,7 @@
   --border: #44403c;
   --accent: #a8a29e;
   --accent-hover: #d6d3d1;
-  --pot-mark: #fbbf24;
+  --pot-tint: rgba(255, 255, 255, 0.06);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.5);
   /* Muted tag palette (dark) - 24 colors */
   --tag-color-0: #1e3a5f;
@@ -128,7 +128,7 @@
   --border: #e7e5e4;
   --accent: #78716c;
   --accent-hover: #57534e;
-  --pot-mark: #b45309;
+  --pot-tint: rgba(99, 102, 241, 0.11);
   --shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 1px 3px rgba(28, 25, 23, 0.08);
   /* Muted tag palette (light) - all 24, so a dark-system host choosing light
      sees pastels everywhere: the media query's dark values win over :root's
@@ -1195,9 +1195,22 @@ textarea.cell.name {
   text-decoration-thickness: 2px;
 }
 
-/* Entries in the Pot: the only ones who can win the next draw */
-.row-pot .cell.name {
-  box-shadow: inset 3px 0 0 var(--pot-mark);
+/* Entries in the Pot: the only ones who can win the next Draw. A tint over
+   the whole row (light: indigo, dark: a lift); adjacent Pot rows form one
+   band, rounded only at its ends. */
+.row-pot {
+  background: var(--pot-tint);
+  border-radius: var(--radius-md);
+}
+
+.row-pot + .row-pot {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.row-pot:has(+ .row-pot) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 /* ===== Add row ===== */
@@ -1291,8 +1304,10 @@ textarea.cell.name {
     box-shadow: 1px 0 0 var(--border);
   }
 
-  .row-pot .cell.name {
-    box-shadow: inset 3px 0 0 var(--pot-mark), 1px 0 0 var(--border);
+  /* The pinned name cell is opaque, so it carries the row's tint over its
+     own background (hover and focus keep their own). */
+  .row-pot .cell.name:not(:hover):not(:focus) {
+    background: linear-gradient(var(--pot-tint), var(--pot-tint)), var(--bg-surface);
   }
 
   .cell.count {
