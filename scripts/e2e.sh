@@ -143,18 +143,18 @@ check "export pick names the winner" "$winner2" "$(printf '%s' "$export2" | pyth
 check "export pick is number 1" "1" "$(printf '%s' "$export2" | python3 -c 'import sys,json;print(json.load(sys.stdin)["picks"][0]["pick_number"])' 2>/dev/null || echo ERR)"
 check "export pick time is RFC3339" "ok" "$(printf '%s' "$export2" | python3 -c 'import sys,json,datetime;datetime.datetime.strptime(json.load(sys.stdin)["picks"][0]["picked_at"],"%Y-%m-%dT%H:%M:%S%z");print("ok")' 2>/dev/null || echo ERR)"
 
-echo "=== import restores the History ==="
+echo "=== import carries the History back ==="
 # Importing the exported file brings the Pick back with it.
 printf '%s' "$export2" > /tmp/opencode/raffle_hist.json
 curl -s -X POST "$base/api/import" -H 'Content-Type: application/json' --data-binary @/tmp/opencode/raffle_hist.json >/dev/null
 hist2=$(curl -s "$base/api/history")
-check "import restored the pick" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
-check "restored pick names the winner" "$winner2" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["entry_name"])' 2>/dev/null || echo ERR)"
-check "restored pick is number 1" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["pick_number"])' 2>/dev/null || echo ERR)"
+check "import carried the pick back" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))' 2>/dev/null || echo ERR)"
+check "imported pick names the winner" "$winner2" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["entry_name"])' 2>/dev/null || echo ERR)"
+check "imported pick is number 1" "1" "$(printf '%s' "$hist2" | python3 -c 'import sys,json;print(json.load(sys.stdin)[0]["pick_number"])' 2>/dev/null || echo ERR)"
 
 echo "=== JSON round-trip ==="
-# The List file is a complete backup: export, import it back (the Import
-# replaces whatever is there), export again: byte for byte the same file.
+# The List file is complete: export, import it back (the Import replaces
+# whatever is there), export again: byte for byte the same file.
 # The import goes through the multipart upload path, as the dialog sends it.
 curl -s "$base/api/export?format=json" > /tmp/opencode/raffle_rt1.json
 curl -s -X POST "$base/api/import" -F "file=@/tmp/opencode/raffle_rt1.json" >/dev/null
