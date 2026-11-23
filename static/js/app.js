@@ -520,12 +520,10 @@ function openImportConfirm(file) {
   // the old Tags and can be corrected by importing again.
   const tags = $("#remove-unused-tags");
   if (tags) tags.checked = false;
-  // Export current List first must offer the List as the host sees it. It
-  // rewrites its own link, not the data-export-format one in the Import /
-  // Export dialog, which stays the page's single advertised export.
-  const name = ($("#list-name")?.value || "").trim() || "raffle";
-  const exportFirst = $("#export-first");
-  if (exportFirst) exportFirst.href = `/api/export?format=json&name=${encodeURIComponent(name)}`;
+  // "Export current List first" keeps the href the template gave it, with no
+  // ?name= override: the server exports the stored List, whose name is saved —
+  // not the possibly-edited #list-name field. The data-export-format link in
+  // the Import / Export dialog stays the page's single advertised export.
   dialog.showModal();
 }
 
@@ -683,13 +681,19 @@ function bindIEDialog() {
 // links, so nothing needs correcting after load.
 let listNameDebounce = null;
 
+// The address of an export link for a List name and format. The ?name=
+// override makes the download's filename follow a rename the host sees,
+// even before it is saved.
+function exportHref(name, format) {
+  return `/api/export?format=${encodeURIComponent(format)}&name=${encodeURIComponent(name)}`;
+}
+
 function updateExportLinks(name) {
   const safeName = name.trim() || "raffle";
   // Found by a stable identity, not by their address, so every rename
   // (not just the first) rewrites them.
   for (const link of $$("a[data-export-format]")) {
-    const format = encodeURIComponent(link.dataset.exportFormat);
-    link.href = `/api/export?format=${format}&name=${encodeURIComponent(safeName)}`;
+    link.href = exportHref(safeName, link.dataset.exportFormat);
   }
 }
 

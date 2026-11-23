@@ -41,14 +41,20 @@ test.describe("import warning", () => {
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
   });
 
-  test("\"Export current List first\" downloads a List file without closing the warning", async ({ page, request }) => {
+  test("\"Export current List first\" downloads the stored List without closing the warning", async ({ page, request }) => {
     await setListName(request, "Club");
     await h.showEntriesOnLoad(page);
     await page.goto("/");
     await h.openImportExport(page);
 
+    // An edit the host has not committed (no blur, no save): the field says
+    // one thing, the stored List still says "Club".
+    await page.locator("#list-name").evaluate((el) => (el.value = "Unsaved Name"));
+
     await page.locator("#import-file").setInputFiles(h.jsonFile("people.json", { entries: [{ name: "Zed" }] }));
     await expect(page.locator("#import-confirm")).toBeVisible();
+    // The link keeps the href the template gave it: no ?name= override.
+    await expect(page.locator("#export-first")).toHaveAttribute("href", "/api/export?format=json");
 
     const download = page.waitForEvent("download");
     await page.locator("#export-first").click();
