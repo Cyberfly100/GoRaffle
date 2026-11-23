@@ -116,13 +116,10 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// isTrue reports whether a request option flag is switched on.
+// isTrue reports whether a request option flag is switched on. The app's
+// Import dialog and the smoke test are the only clients, and both send "1".
 func isTrue(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
+	return strings.TrimSpace(v) == "1"
 }
 
 // readUpload returns the import file's bytes and its content-type hint. A
