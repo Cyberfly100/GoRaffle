@@ -520,7 +520,7 @@ function openImportConfirm(file) {
   // the old Tags and can be corrected by importing again.
   const tags = $("#remove-unused-tags");
   if (tags) tags.checked = false;
-  // "Export current List first" keeps the href the template gave it, with no
+  // "Export current entries first" keeps the href the template gave it, with no
   // ?name= override: the server exports the stored List, whose name is saved —
   // not the possibly-edited #list-name field. The data-export-format link in
   // the Import / Export dialog stays the page's single advertised export.
@@ -599,7 +599,11 @@ async function doImport(opts = {}) {
       updateExportLinks(data.list_name);
     }
   }
+  // A successful Import leaves nothing popup-shaped open: the warning and the
+  // Import / Export dialog behind it both close, back to the page and the
+  // toast. Failures keep the dialogs for a retry or the skip offer.
   closeImportConfirm();
+  $("#ie-dialog")?.close();
   refreshIfNoWS();
 }
 

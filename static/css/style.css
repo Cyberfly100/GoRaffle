@@ -1408,6 +1408,11 @@ dialog::backdrop {
   margin-bottom: 0.5rem;
 }
 
+/* The three actions keep air between them instead of touching. */
+.import-confirm .dialog-actions {
+  gap: 0.5rem;
+}
+
 #import-confirm-text {
   margin: 0;
 }

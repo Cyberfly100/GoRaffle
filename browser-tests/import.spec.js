@@ -13,6 +13,7 @@ test.describe("import warning", () => {
       .setInputFiles(h.jsonFile("people.json", { list_name: "ZedList", entries: [{ name: "Zed" }] }));
 
     await expect(page.locator("#import-confirm")).toBeVisible();
+    await expect(page.locator("#import-confirm h2")).toHaveText("Import replaces the entries");
     await expect(page.locator("#import-confirm-text")).toContainText("replaces all Entries and the History");
     await expect(page.locator("#file-chosen")).toHaveText("people.json");
 
@@ -35,13 +36,14 @@ test.describe("import warning", () => {
 
     await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
     await expect(page.locator("#import-confirm")).toBeHidden();
+    // Nothing popup-shaped stays open after a successful Import.
+    await expect(page.locator("#ie-dialog")).toBeHidden();
     await expect(page.locator("#file-chosen")).toHaveText("No file chosen");
     await expect(page.locator("#import-file")).toHaveValue("");
-    await h.closeImportExport(page);
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
   });
 
-  test("\"Export current List first\" downloads the stored List without closing the warning", async ({ page, request }) => {
+  test("\"Export current entries first\" downloads the stored List without closing the warning", async ({ page, request }) => {
     await setListName(request, "Club");
     await h.showEntriesOnLoad(page);
     await page.goto("/");
@@ -53,6 +55,7 @@ test.describe("import warning", () => {
 
     await page.locator("#import-file").setInputFiles(h.jsonFile("people.json", { entries: [{ name: "Zed" }] }));
     await expect(page.locator("#import-confirm")).toBeVisible();
+    await expect(page.locator("#export-first")).toHaveText("Export current entries first");
     // The link keeps the href the template gave it: no ?name= override.
     await expect(page.locator("#export-first")).toHaveAttribute("href", "/api/export?format=json");
 
@@ -86,7 +89,7 @@ test.describe("import warning", () => {
     await expect(h.toast(page)).toHaveText("Imported: 1 entry, 0 picks.");
     // The Tag filter bar re-renders from the Import's change event.
     await expect.poll(() => fetched().filter((p) => p === "/partials/filter").length).toBeGreaterThan(0);
-    await h.closeImportExport(page);
+    await expect(page.locator("#ie-dialog")).toBeHidden();
     await expect.poll(() => h.availableTags(page)).toEqual(["keep"]);
   });
 
@@ -120,7 +123,7 @@ test.describe("import warning", () => {
 
     await expect(h.toast(page)).toHaveText("Imported: 1 entry, 1 pick.");
     await expect(page.locator("#import-confirm")).toBeHidden();
-    await h.closeImportExport(page);
+    await expect(page.locator("#ie-dialog")).toBeHidden();
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ben"]);
     await expect.poll(() => h.historyNames(page)).toEqual(["Ben"]);
   });
@@ -159,7 +162,7 @@ test.describe("legacy import", () => {
 
     await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
     await expect(page.locator("#import-confirm")).toBeHidden();
-    await h.closeImportExport(page);
+    await expect(page.locator("#ie-dialog")).toBeHidden();
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
   });
 
@@ -172,7 +175,7 @@ test.describe("legacy import", () => {
     await h.importFile(page, h.jsonFile("people.json", ["Ada", "Grace"]));
 
     await expect(h.toast(page)).toHaveText("Imported: 2 entries, 0 picks.");
-    await h.closeImportExport(page);
+    await expect(page.locator("#ie-dialog")).toBeHidden();
     await expect.poll(() => h.entryNamesInTable(page)).toEqual(["Ada", "Grace"]);
   });
 
