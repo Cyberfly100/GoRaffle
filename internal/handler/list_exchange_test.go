@@ -318,8 +318,8 @@ func TestRemovedExportsAreGone(t *testing.T) {
 	if exports != 1 {
 		t.Errorf("page offers %d exports, want exactly one (the List file):\n%s", exports, page)
 	}
-	if !strings.Contains(string(page), ">List file<") {
-		t.Errorf("page does not offer the List file:\n%s", page)
+	if !strings.Contains(string(page), `data-export-format="json"`) {
+		t.Errorf("page does not offer the List file (JSON):\n%s", page)
 	}
 	history := bodyOf(t, ts, "/partials/history")
 	if strings.Contains(string(history), "/api/export") {
